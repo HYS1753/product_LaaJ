@@ -1,0 +1,42 @@
+/* Cards (Liquid Surface) */
+.card {
+  background: linear-gradient(135deg, rgba(255,255,255,0.75), rgba(255,255,255,0.55));
+  backdrop-filter: blur(22px) saturate(160%);
+  border-radius: 20px;
+  padding: 28px;
+  border: 0.5px solid rgba(0,0,0,0.06);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.08);
+}
+
+/* section-card */
+.section-card {
+  background: white;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+/* status badges */
+.status-badge {
+  margin-top: 28px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+.status-done {
+  background: var(--success-soft);
+  color: #256f3a;
+}
+.status-pending {
+  background: #f3f4f6;
+  color: var(--text-muted);
+}
+
+/* helper text */
+.helper-text {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}

@@ -1,0 +1,13 @@
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+}
+
+/* App Background (PURE WHITE) */
+[data-testid="stAppViewContainer"] {
+  background: #ffffff;
+}
+
+/* Main Content */
+[data-testid="stMainBlockContainer"] {
+  background: transparent !important;
+}

@@ -1,0 +1,9 @@
+:root {
+  --border-light: rgba(0,0,0,0.08);
+  --text-muted: rgba(30,35,40,0.55);
+
+  --success-soft: rgba(34,197,94,0.12);
+  --warning-soft: rgba(249,115,22,0.10);
+
+  --shadow-soft: 0 6px 18px rgba(0,0,0,0.04);
+}
