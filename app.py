@@ -21,7 +21,8 @@ load_css(
         "css/global.css",
         "css/layout_header_sidebar.css",
         "css/components_cards_badges.css",
-        "css/components_stepper_wizard.css"
+        "css/components_stepper_wizard.css",
+        "css/components_buttons.css"
     )
 
 # -----------------------------

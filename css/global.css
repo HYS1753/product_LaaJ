@@ -10,4 +10,74 @@ html, body {
 /* Main Content */
 [data-testid="stMainBlockContainer"] {
   background: transparent !important;
+  max-width: 1100px;          /* 너무 꽉 차면 줄이기 */
+  margin: 0 auto;             /* 가운데 정렬 */
+  padding-left: 1.6rem;       /* 좌 여백 */
+  padding-right: 1.6rem;      /* 우 여백 */
+}
+
+/* =========================
+   Borderless Expander
+========================= */
+
+/* expander 외곽 박스 제거 */
+[data-testid="stExpander"] {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+/* expander 내부 padding 줄이기 */
+[data-testid="stExpander"] > details {
+  padding: 0 !important;
+}
+
+/* 제목(summary) 스타일만 유지 */
+[data-testid="stExpander"] summary {
+  padding: 6px 0 !important;
+  font-weight: 600;
+}
+
+/* 펼쳐진 콘텐츠 여백 정리 */
+[data-testid="stExpander"] .stMarkdown,
+[data-testid="stExpander"] .stTextArea {
+  margin-top: 8px;
+}
+
+/* header */
+.step-help {
+  padding: 18px 18px;
+  border: 1px solid rgba(0,0,0,0);
+  border-radius: 14px;
+  background: rgba(255,255,255,0);
+  box-shadow: 0 10px 22px rgba(0,0,0,0);
+}
+.step-help .sub{
+  font-size: 13px;
+  color: rgba(0,0,0,0.60);
+  line-height: 1.6;
+}
+.step-header {
+  margin-top: 6px;
+  margin-bottom: 10px;
+}
+.step-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: rgba(0,0,0,0.88);
+  line-height: 1.2;
+}
+.step-subtitle {
+  font-size: 13px;
+  color: rgba(0,0,0,0.60);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+.step-form{
+  padding: 18px 18px;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.05);
 }
