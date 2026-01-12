@@ -55,11 +55,15 @@ def render():
     latest_ts = max((r["mtime"] for r in rows), default=None)
     latest_str = _fmt_dt(latest_ts) if latest_ts else "-"
 
-    st.markdown("<div class='step-title'>저장된 Test Setting</div>", unsafe_allow_html=True)
+    st.markdown("<div class='step-title'>Test Setting Lists</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='sub'>"
-        "Step 5에서 저장된 테스트 설정(JSON)을 불러와 목록으로 보여줍니다. "
-        "설정을 선택한 뒤 Run Test(목업)로 다음 단계에서 실행 로직을 연결할 수 있습니다."
+        "<br>"
+        "<b>Test Setting</b>에서 정의한 테스트 설정 목록 입니다."
+        "<br>"
+        "테스트 수행 할 설정을 선택한 뒤 <b>Run Test</b> 버튼을 통해 다음 단계에서 실행 로직을 연결할 수 있습니다."
+        "<br>"
+        "또한, <b>➕ 새 테스트 만들기</b> 버튼으로 설정을 추가 할 수 있습니다."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -75,7 +79,7 @@ def render():
         with right:
             st.button(
                 "➕ 새 테스트 만들기",
-                type="primary",
+                type="secondary",
                 use_container_width=True,
                 key="create_new_test_empty",
                 on_click=_goto_setting,
@@ -115,7 +119,7 @@ def render():
 
         st.button(
             "➕ 새 테스트 만들기",
-            type="primary",
+            type="secondary",
             use_container_width=True,
             key="create_new_test",
             on_click=_goto_setting,

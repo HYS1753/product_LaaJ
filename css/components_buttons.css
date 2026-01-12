@@ -63,14 +63,39 @@
    - White background, black border & text
 ========================================= */
 [data-testid="stButton"] button:not([kind="primary"]) {
-  background-color: #fff !important;
+  background:
+    radial-gradient(600px 300px at 10% -20%, rgba(180,200,255,0.22), transparent 60%),
+    radial-gradient(500px 300px at 90% 10%, rgba(255,180,200,0.18), transparent 55%),
+    linear-gradient(
+      180deg,
+      rgba(247,248,251,0.78) 0%,
+      rgba(238,241,246,0.72) 100%
+    ) !important;
+
   color: #111 !important;
-  border: 1px solid #111 !important;
+  border: 1px solid rgba(255,255,255,0.32) !important;
+  border-radius: 14px !important;
+
+  backdrop-filter: blur(22px) saturate(170%);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+
+  box-shadow:
+    0 14px 32px rgba(0,0,0,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.75),
+    inset 0 -1px 0 rgba(255,255,255,0.20);
+
+  font-weight: 700;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.12s ease;
 }
 
 /* hover */
 [data-testid="stButton"] button:not([kind="primary"]):hover {
-  background-color: #f5f5f5 !important;
+    box-shadow:
+    0 16px 36px rgba(0,0,0,0.14),
+    inset 0 1px 0 rgba(255,255,255,0.75);
 }
 
 /* active */
@@ -82,12 +107,16 @@
 [data-testid="stButton"] button:not([kind="primary"]):focus,
 [data-testid="stButton"] button:not([kind="primary"]):focus-visible {
   outline: none !important;
-  box-shadow: 0 0 0 2px rgba(0,0,0,0.18) !important;
+  box-shadow:
+    0 0 0 2px rgba(120,150,255,0.35),
+    0 16px 36px rgba(0,0,0,0.14);
 }
 
 /* disabled */
 [data-testid="stButton"] button:not([kind="primary"]):disabled {
-  color: #aaa !important;
-  border-color: #ddd !important;
-  background-color: #fafafa !important;
+    background: #f4f4f4 !important;
+    color: #aaa !important;
+    border-color: #ddd !important;
+    box-shadow: none !important;
+    transform: none !important;
 }
