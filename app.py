@@ -23,7 +23,8 @@ load_css(
         "css/components_cards_badges.css",
         "css/components_stepper_wizard.css",
         "css/components_buttons.css",
-        "css/components_kpis.css"
+        "css/components_kpis.css",
+        "css/components_summary_cards.css",
     )
 
 # -----------------------------
