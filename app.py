@@ -1,5 +1,5 @@
 import streamlit as st
-from _pages import readme_page, test_config_page, test_result_page
+from _pages import readme_page, test_setting_page, test_runner_page
 from utils.css_loader import load_css
 from utils.session_manager import init_session_state
 
@@ -44,13 +44,13 @@ with st.sidebar:
 
     page = st.radio(
         "navigation",
-        ["description", "settings", "run&result"],  # 🔴 내부 값 = state 값
+        ["description", "setting", "runner"],  # 🔴 내부 값 = state 값
         label_visibility="collapsed",
         key="page",  # 🔴 기존 state 그대로 사용
         format_func=lambda x: {
             "description": "📖ㅤDescription",
-            "settings": "⚙️ㅤTest Settings",
-            "run&result": "📊ㅤTest Run & Result",
+            "setting": "⚙️ㅤTest Setting",
+            "runner": "🚀ㅤTest Runner", # 📊
         }[x],
     )
 
@@ -59,7 +59,7 @@ with st.sidebar:
 # -----------------------------
 if st.session_state.page == "description":
     readme_page.render()
-elif st.session_state.page == "settings":
-    test_config_page.render()
-elif st.session_state.page == "run&result":
-    test_result_page.render()
+elif st.session_state.page == "setting":
+    test_setting_page.render()
+elif st.session_state.page == "runner":
+    test_runner_page.render()

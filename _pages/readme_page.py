@@ -40,4 +40,4 @@ def render():
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.success("👈 왼쪽 사이드바에서 **Test Settings**을 선택하여 시작하세요!")
+    st.success("👈 왼쪽 사이드바에서 **Test Setting**을 선택하여 시작하세요!")

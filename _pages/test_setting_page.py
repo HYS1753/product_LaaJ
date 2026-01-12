@@ -41,7 +41,7 @@ GROUPS = [
 
 
 # =====================================================
-# ✅ FIX: Single Source of Truth (settings snapshot)
+# ✅ FIX: Single Source of Truth (setting snapshot)
 # =====================================================
 def _default_group_cfg():
     return {
@@ -59,9 +59,9 @@ def _default_group_cfg():
     }
 
 
-def _init_settings_store():
-    if "ab_settings" not in st.session_state:
-        st.session_state.ab_settings = {
+def _init_setting_store():
+    if "ab_setting" not in st.session_state:
+        st.session_state.ab_setting = {
             "test_name": "",
             "keywords": {
                 "kw_method": "텍스트 직접 입력",
@@ -74,21 +74,21 @@ def _init_settings_store():
 
 
 def _load_widgets_from_store_for_keywords():
-    store = st.session_state.ab_settings["keywords"]
+    store = st.session_state.ab_setting["keywords"]
     st.session_state.setdefault("kw_method", store.get("kw_method", "텍스트 직접 입력"))
     st.session_state.setdefault("kw_delim", store.get("kw_delim", ","))
     st.session_state.setdefault("kw_text", store.get("kw_text", ""))
 
 
 def _save_keywords_to_store():
-    store = st.session_state.ab_settings["keywords"]
+    store = st.session_state.ab_setting["keywords"]
     store["kw_method"] = st.session_state.get("kw_method", "텍스트 직접 입력")
     store["kw_delim"] = st.session_state.get("kw_delim", ",")
     store["kw_text"] = st.session_state.get("kw_text", "")
 
 
 def _load_widgets_from_store_for_group(prefix: str):
-    g = st.session_state.ab_settings[prefix]
+    g = st.session_state.ab_setting[prefix]
 
     # ✅ FIX: 위젯 키를 store 값으로 "없을 때만" 채움 (사용자 입력을 덮지 않음)
     st.session_state.setdefault(f"{prefix}_method", g.get("method", "GET"))
@@ -110,7 +110,7 @@ def _load_widgets_from_store_for_group(prefix: str):
 
 
 def _save_group_widgets_to_store(prefix: str):
-    g = st.session_state.ab_settings[prefix]
+    g = st.session_state.ab_setting[prefix]
 
     g["method"] = st.session_state.get(f"{prefix}_method", "GET")
     g["url"] = st.session_state.get(f"{prefix}_url", "")
@@ -145,7 +145,7 @@ def _save_current_step_snapshot():
 def render():
     _init_state()
 
-    st.title("A/B Test Settings")
+    st.title("Test Setting")
     st.caption("검색 키워드 및 대조군(Control Group) / 실험군(Experimental Group) 조건을 단계별로 설정합니다.")
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
@@ -195,7 +195,7 @@ def _init_state():
         st.session_state.current_step = 0
 
     # ✅ FIX: store init
-    _init_settings_store()
+    _init_setting_store()
 
     # ✅ step completion flags (Next gate)
     st.session_state.setdefault("step_2a_completed", False)
@@ -209,7 +209,7 @@ def _init_state():
 
 def _can_go_next(step: int) -> bool:
     if step == 0:
-        name = (st.session_state.ab_settings.get("test_name") or "").strip()
+        name = (st.session_state.ab_setting.get("test_name") or "").strip()
         if not name:
             return False
         # 같은 이름 파일 체크 (아래 2번의 저장 경로 함수 재사용)
@@ -236,8 +236,8 @@ def _go_next():
     st.session_state.current_step = min(last_step, st.session_state.current_step + 1)
 
 def _go_done():
-    st.session_state.page = "run&result"
-    st.rerun()
+    st.session_state.page = "runner"
+    # TODO: done 클릭 시 해당 세팅 초기화 후 0번으로 이동되도록 수정.
 
 # =====================================================
 # UI - Stepper / Nav
@@ -376,8 +376,8 @@ def _render_step_intro():
     )
     name = st.text_input("테스트 설정 이름", key="test_name_input")
     # 입력 시 store 반영
-    st.session_state.ab_settings["test_name"] = name.strip()
-    if _config_exists(st.session_state.ab_settings["test_name"]):
+    st.session_state.ab_setting["test_name"] = name.strip()
+    if _config_exists(st.session_state.ab_setting["test_name"]):
         st.error("같은 이름의 테스트 설정이 이미 존재합니다. 다른 이름을 입력하세요.")
 
 # =====================================================
@@ -481,7 +481,7 @@ def _render_step_keywords():
 # =====================================================
 def _cfg(prefix: str) -> dict:
     # store를 신뢰 (렌더링/조건부 위젯 영향 없음)
-    g = st.session_state.ab_settings[prefix]
+    g = st.session_state.ab_setting[prefix]
 
     fixed_rows = g.get("fixed_params_rows", []) or []
     fixed_params = {r.get("k"): r.get("v") for r in fixed_rows if (r.get("k") or "").strip()}
@@ -574,7 +574,7 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
         )
 
     with right:
-        st.markdown("**Default Settings**")
+        st.markdown("**Default Setting**")
 
         c1, c2 = st.columns([1, 2])
         with c1:
@@ -594,7 +594,7 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
 
         st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
-        st.markdown("**Extra Parameters Settings**")
+        st.markdown("**Extra Parameters Setting**")
         with st.expander("고정 파라미터", expanded=False):
             st.markdown(
                 "<div class='sub' style='margin-top:-4px'>"
@@ -667,7 +667,7 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
             _save_group_widgets_to_store(group_prefix)
 
             st.session_state[last_error_key] = None
-            st.session_state.ab_settings[group_prefix]["last_error"] = None  # store에도 반영
+            st.session_state.ab_setting[group_prefix]["last_error"] = None  # store에도 반영
 
             cfg = _cfg(group_prefix)
             url = (cfg["url"] or "").strip()
@@ -948,7 +948,7 @@ def _render_step_generation():
                 gen_notice.success("완료! 모든 키워드에 대해 Control/Experimental 테스트 데이터가 생성되었습니다.")
 
             # config 데이터 저장
-            test_name = st.session_state.ab_settings.get("test_name", "").strip()
+            test_name = st.session_state.ab_setting.get("test_name", "").strip()
             if not test_name:
                 st.error("테스트 설정 이름이 없습니다. 처음 단계로 돌아가 이름을 설정해주세요.")
                 return
@@ -996,7 +996,7 @@ def _render_step_generation():
                 default_dir = str(_config_dir())
                 alt_dir = st.text_input("저장 폴더(서버 경로)", value=default_dir, key="alt_save_dir")
 
-                test_name = st.session_state.ab_settings.get("test_name", "").strip() or "test_config"
+                test_name = st.session_state.ab_setting.get("test_name", "").strip() or "test_config"
                 alt_file = st.text_input("파일명", value=f"{test_name}.json", key="alt_save_name")
 
                 save_notice = st.empty()
