@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from pathlib import Path
 import streamlit as st
 
 from utils.keyword_loader import (
@@ -25,6 +26,7 @@ from utils.session_manager import (
 # Step Definitions
 # =====================================================
 STEPS = [
+    {"id": 0, "key": "intro", "label": "Overview"},
     {"id": 1, "key": "keywords", "label": "Search Keywords"},
     {"id": 2, "key": "control_group", "label": "Control Group"},
     {"id": 3, "key": "experimental_group", "label": "Experimental Group"},
@@ -60,6 +62,7 @@ def _default_group_cfg():
 def _init_settings_store():
     if "ab_settings" not in st.session_state:
         st.session_state.ab_settings = {
+            "test_name": "",
             "keywords": {
                 "kw_method": "텍스트 직접 입력",
                 "kw_delim": ",",
@@ -152,7 +155,9 @@ def render():
     st.markdown("<div style='height:50px'></div>", unsafe_allow_html=True)
 
     step = st.session_state.current_step
-    if step == 1:
+    if step == 0:
+        _render_step_intro()
+    elif step == 1:
         _render_step_keywords()
     elif step == 2:
         _render_step_api(group_name="Control", group_prefix="control", step_key="2a", step_no=2)
@@ -173,9 +178,21 @@ def render():
 # =====================================================
 # State / Validation
 # =====================================================
+def _config_dir() -> Path:
+    return Path.cwd() / "test_config"
+
+def _config_path(test_name: str) -> Path:
+    safe = test_name.strip()
+    return _config_dir() / f"{safe}.json"
+
+def _config_exists(test_name: str) -> bool:
+    if not test_name.strip():
+        return False
+    return _config_path(test_name).exists()
+
 def _init_state():
     if "current_step" not in st.session_state:
-        st.session_state.current_step = 1
+        st.session_state.current_step = 0
 
     # ✅ FIX: store init
     _init_settings_store()
@@ -183,12 +200,20 @@ def _init_state():
     # ✅ step completion flags (Next gate)
     st.session_state.setdefault("step_2a_completed", False)
     st.session_state.setdefault("step_2b_completed", False)
+    st.session_state.setdefault("generation_saved_ok", False)
+    st.session_state.setdefault("last_saved_path", "")
 
     if "generated_payload" not in st.session_state:
         st.session_state.generated_payload = None
 
 
 def _can_go_next(step: int) -> bool:
+    if step == 0:
+        name = (st.session_state.ab_settings.get("test_name") or "").strip()
+        if not name:
+            return False
+        # 같은 이름 파일 체크 (아래 2번의 저장 경로 함수 재사용)
+        return not _config_exists(name)
     if step == 1:
         return bool(get_keywords())
     if step == 2:
@@ -201,14 +226,18 @@ def _can_go_next(step: int) -> bool:
 
 
 def _go_prev():
-    _save_current_step_snapshot()  # ✅ FIX
-    st.session_state.current_step = max(1, st.session_state.current_step - 1)
-
+    _save_current_step_snapshot()
+    first_step = STEPS[0]["id"]
+    st.session_state.current_step = max(first_step, st.session_state.current_step - 1)
 
 def _go_next():
-    _save_current_step_snapshot()  # ✅ FIX
-    st.session_state.current_step = min(len(STEPS), st.session_state.current_step + 1)
+    _save_current_step_snapshot()
+    last_step = STEPS[-1]["id"]
+    st.session_state.current_step = min(last_step, st.session_state.current_step + 1)
 
+def _go_done():
+    st.session_state.page = "run&result"
+    st.rerun()
 
 # =====================================================
 # UI - Stepper / Nav
@@ -249,7 +278,9 @@ def _on_next_clicked():
         _go_next()
         return
 
-    if step == 1:
+    if step == 0:
+        msg = "다음 단계로 이동하려면 테스트 이름을 설정 해 주세요."
+    elif step == 1:
         msg = "다음 단계로 이동하려면 검색 키워드를 로드해주세요."
     elif step == 2:
         msg = "다음 단계로 이동하려면 Control Group 설정 후 테스트를 성공시켜주세요."
@@ -265,9 +296,15 @@ def _on_next_clicked():
 
 def _render_wizard_nav():
     step = st.session_state.current_step
-    is_first = (step == 1)
-    is_last = (step == len(STEPS))
 
+    # ✅ FIX: step id 기반으로 첫/마지막 판단 (len(STEPS)는 6이지만 마지막 id는 5)
+    first_step = STEPS[0]["id"]      # 0
+    last_step = STEPS[-1]["id"]      # 5
+
+    is_first = (step == first_step)
+    is_last = (step == last_step)
+
+    # ✅ Next가 맨 오른쪽, Back이 그 왼쪽
     spacer, c_back, c_next = st.columns([0.78, 0.10, 0.12], gap="small", vertical_alignment="center")
 
     with c_back:
@@ -277,8 +314,71 @@ def _render_wizard_nav():
         if not is_last:
             st.button("Next ›", type="primary", use_container_width=True, on_click=_on_next_clicked)
         else:
-            st.button("완료", type="primary", use_container_width=True, disabled=True)
+            # ✅ 마지막(step 5)에서는 Done 표시 + 저장 완료 시 활성화
+            done_enabled = bool(st.session_state.get("generation_saved_ok", False))
+            st.button(
+                "Done",
+                type="primary",
+                use_container_width=True,
+                disabled=not done_enabled,
+                on_click=_go_done
+            )
 
+# =====================================================
+# STEP 0. Overview
+# =====================================================
+def _render_step_intro():
+    st.markdown("### LLM as a Judge 테스트 설정 개요")
+    st.markdown(
+        """
+        <div style="
+            padding: 16px 18px;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.03);
+            line-height: 1.65;
+        ">
+          <div style="margin-bottom: 10px;">
+            이 테스트는 <b>LLM as a Judge 평가</b>를 수행하기 위해 필요한
+            <b>테스트 데이터 수집 설정</b>과 <b>테스트 데이터 생성·저장</b> 전체 과정을 구성하기 위한 설정 페이지입니다.
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <b>검색 키워드</b>를 기반으로 <b>Control / Experimental</b> API 호출 조건을 정의하고,
+            각 조건에 대해 실제 호출을 수행하여 응답 데이터를 수집합니다.<br/>
+            수집된 결과는 이후 LLM 기반 평가에 활용할 수 있도록
+            <b>구조화된 테스트 데이터(JSON)</b> 형태로 생성되며, <b>서버 지정 경로</b>에 저장됩니다.
+          </div>
+
+          <div style="font-weight: 700; margin: 10px 0 6px;">
+            이 설정 과정에서 다루는 항목
+          </div>
+
+          <ul style="margin: 0 0 12px 18px; padding: 0;">
+            <li><b>검색 키워드</b> 정의</li>
+            <li><b>Control / Experimental</b> 그룹별 API 요청 방식 및 파라미터 설정</li>
+            <li><b>응답 파싱 규칙</b> 정의</li>
+            <li><b>전체 키워드</b>에 대한 테스트 데이터 일괄 생성 및 저장</li>
+          </ul>
+
+          <div style="
+              padding: 10px 12px;
+              border-left: 4px solid rgba(99,102,241,0.9);
+              background: rgba(99,102,241,0.10);
+              border-radius: 8px;
+          ">
+            최종적으로 <b>하나의 테스트 설정 이름(name)</b>을 기준으로
+            <b>재현 가능한 평가용 데이터셋</b>을 생성하는 것을 목표로 합니다.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    name = st.text_input("테스트 설정 이름", key="test_name_input")
+    # 입력 시 store 반영
+    st.session_state.ab_settings["test_name"] = name.strip()
+    if _config_exists(st.session_state.ab_settings["test_name"]):
+        st.error("같은 이름의 테스트 설정이 이미 존재합니다. 다른 이름을 입력하세요.")
 
 # =====================================================
 # STEP 1. Keyword
@@ -721,6 +821,13 @@ def _render_step_generation():
     # ✅ FIX: Generation도 진입 시점에 스냅샷
     _save_current_step_snapshot()
 
+    # 상태 초기화
+    st.session_state.setdefault("entered_step5", False)
+    if not st.session_state.entered_step5:
+        st.session_state.generation_saved_ok = False
+        st.session_state.last_saved_path = ""
+        st.session_state.entered_step5 = True
+
     left, right = st.columns([0.42, 0.58], gap="large", vertical_alignment="top")
 
     with left:
@@ -760,6 +867,7 @@ def _render_step_generation():
         st.caption(f"총 {len(kws)}개 키워드를 Control/Experimental로 모두 호출합니다.")
 
         run = st.button("테스트 데이터 생성", type="primary", use_container_width=True)
+        gen_notice = st.empty()
         if run:
             progress = st.progress(0)
             status = st.empty()
@@ -814,8 +922,6 @@ def _render_step_generation():
                 results.append(row)
                 progress.progress(idx / total)
 
-            status.success("완료! 테스트 데이터가 생성되었습니다.")
-
             payload = {
                 "meta": {
                     "generated_at": datetime.utcnow().isoformat() + "Z",
@@ -829,17 +935,102 @@ def _render_step_generation():
 
             st.session_state.generated_payload = payload
 
+            # 실행 완료 여부 설정
+            control_fail = sum(1 for r in results if not r["control"].get("success"))
+            exp_fail = sum(1 for r in results if not r["experimental"].get("success"))
+            any_fail = (control_fail > 0) or (exp_fail > 0)
+
+            if any_fail:
+                gen_notice.warning(
+                    f"생성 완료(부분 실패 포함). Control 실패 {control_fail}건 / Experimental 실패 {exp_fail}건"
+                )
+            else:
+                gen_notice.success("완료! 모든 키워드에 대해 Control/Experimental 테스트 데이터가 생성되었습니다.")
+
+            # config 데이터 저장
+            test_name = st.session_state.ab_settings.get("test_name", "").strip()
+            if not test_name:
+                st.error("테스트 설정 이름이 없습니다. 처음 단계로 돌아가 이름을 설정해주세요.")
+                return
+
+            out_dir = _config_dir()
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = _config_path(test_name)
+
+            out_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8"
+            )
+
+            st.session_state.generated_payload = payload  # 내부 보관은 해도 되고 안 해도 됨
+            st.toast(f"저장 완료: {out_path}", icon="✅")
+            st.session_state.generation_saved_ok = True  # ✅ 추가
+            st.session_state.last_saved_path = str(out_path)
+            st.rerun()
+
         if st.session_state.get("generated_payload"):
             st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
             st.markdown("### Output")
-            with st.expander("생성된 JSON 미리보기", expanded=False):
-                st.json(st.session_state.generated_payload)
 
-            json_bytes = json.dumps(st.session_state.generated_payload, ensure_ascii=False, indent=2).encode("utf-8")
-            st.download_button(
-                label="JSON 다운로드",
-                data=json_bytes,
-                file_name=f"ab_test_data_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                use_container_width=True,
-            )
+            # ✅ 저장 완료 안내 텍스트(고정)
+            saved_path = st.session_state.get("last_saved_path", "")
+            if saved_path:
+                st.info(
+                    f"✅ 설정 JSON이 아래 위치에 저장 완료되었습니다.\n\n"
+                    f"- 저장 경로: `{saved_path}`\n\n"
+                    f"다른 위치에 저장하려면 아래에서 경로/파일명을 지정해 저장하세요."
+                )
+
+            # ✅ 다른 위치 저장 UI (접기/펼치기)
+            st.session_state.setdefault("show_alt_save", False)
+
+            if not st.session_state.show_alt_save:
+                # 기본 상태: 버튼만 노출
+                if st.button("서버에 다른 위치로 저장", use_container_width=True, key="open_alt_save"):
+                    st.session_state.show_alt_save = True
+                    st.rerun()
+            else:
+                # 펼쳐진 상태: 입력 + 저장 버튼만 노출
+                st.markdown("#### 다른 위치로 저장")
+
+                default_dir = str(_config_dir())
+                alt_dir = st.text_input("저장 폴더(서버 경로)", value=default_dir, key="alt_save_dir")
+
+                test_name = st.session_state.ab_settings.get("test_name", "").strip() or "test_config"
+                alt_file = st.text_input("파일명", value=f"{test_name}.json", key="alt_save_name")
+
+                save_notice = st.empty()
+
+                c_cancel, c_save = st.columns([0.35, 0.65], gap="small")
+                with c_cancel:
+                    if st.button("취소", use_container_width=True, key="close_alt_save"):
+                        st.session_state.show_alt_save = False
+                        st.rerun()
+
+                with c_save:
+                    if st.button("저장", type="primary", use_container_width=True, key="do_alt_save"):
+                        try:
+                            from pathlib import Path
+                            out_dir2 = Path(alt_dir)
+                            out_dir2.mkdir(parents=True, exist_ok=True)
+
+                            filename = alt_file.strip()
+                            if not filename.lower().endswith(".json"):
+                                filename += ".json"
+
+                            out_path2 = out_dir2 / filename
+                            out_path2.write_text(
+                                json.dumps(st.session_state.generated_payload, ensure_ascii=False, indent=2),
+                                encoding="utf-8"
+                            )
+
+                            save_notice.success(f"✅ 저장 완료: {out_path2}")
+                            st.session_state.generation_saved_ok = True
+                            st.session_state.last_saved_path = str(out_path2)
+
+                            # 저장 성공하면 접기(원하면 유지해도 됨)
+                            st.session_state.show_alt_save = False
+                            st.rerun()
+
+                        except Exception as e:
+                            save_notice.error(f"저장 실패: {e}")
