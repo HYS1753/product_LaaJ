@@ -37,6 +37,105 @@ GROUPS = [
     {"name": "Experimental", "prefix": "experimental"},
 ]
 
+
+# =====================================================
+# ✅ FIX: Single Source of Truth (settings snapshot)
+# =====================================================
+def _default_group_cfg():
+    return {
+        "method": "GET",
+        "url": "",
+        "param": "query",
+        "headers": "",
+        "body": "",
+        "parse": "",
+        "fixed_params_rows": [],  # [{"k": "...", "v": "..."}]
+        "tested": False,
+        "last_curl": "",
+        "last_result": None,
+        "last_error": None,
+    }
+
+
+def _init_settings_store():
+    if "ab_settings" not in st.session_state:
+        st.session_state.ab_settings = {
+            "keywords": {
+                "kw_method": "텍스트 직접 입력",
+                "kw_delim": ",",
+                "kw_text": "",
+            },
+            "control": _default_group_cfg(),
+            "experimental": _default_group_cfg(),
+        }
+
+
+def _load_widgets_from_store_for_keywords():
+    store = st.session_state.ab_settings["keywords"]
+    st.session_state.setdefault("kw_method", store.get("kw_method", "텍스트 직접 입력"))
+    st.session_state.setdefault("kw_delim", store.get("kw_delim", ","))
+    st.session_state.setdefault("kw_text", store.get("kw_text", ""))
+
+
+def _save_keywords_to_store():
+    store = st.session_state.ab_settings["keywords"]
+    store["kw_method"] = st.session_state.get("kw_method", "텍스트 직접 입력")
+    store["kw_delim"] = st.session_state.get("kw_delim", ",")
+    store["kw_text"] = st.session_state.get("kw_text", "")
+
+
+def _load_widgets_from_store_for_group(prefix: str):
+    g = st.session_state.ab_settings[prefix]
+
+    # ✅ FIX: 위젯 키를 store 값으로 "없을 때만" 채움 (사용자 입력을 덮지 않음)
+    st.session_state.setdefault(f"{prefix}_method", g.get("method", "GET"))
+    st.session_state.setdefault(f"{prefix}_url", g.get("url", ""))
+    st.session_state.setdefault(f"{prefix}_param", g.get("param", "query"))
+    st.session_state.setdefault(f"{prefix}_headers", g.get("headers", ""))
+    st.session_state.setdefault(f"{prefix}_body", g.get("body", ""))
+    st.session_state.setdefault(f"{prefix}_parse", g.get("parse", ""))
+
+    st.session_state.setdefault(f"{prefix}_tested", g.get("tested", False))
+    st.session_state.setdefault(f"{prefix}_last_curl", g.get("last_curl", ""))
+    st.session_state.setdefault(f"{prefix}_last_result", g.get("last_result", None))
+    st.session_state.setdefault(f"{prefix}_last_error", g.get("last_error", None))
+
+    # fixed params rows
+    fixed_key = f"{prefix}_fixed_params"
+    if fixed_key not in st.session_state:
+        st.session_state[fixed_key] = g.get("fixed_params_rows", []) or []
+
+
+def _save_group_widgets_to_store(prefix: str):
+    g = st.session_state.ab_settings[prefix]
+
+    g["method"] = st.session_state.get(f"{prefix}_method", "GET")
+    g["url"] = st.session_state.get(f"{prefix}_url", "")
+    g["param"] = st.session_state.get(f"{prefix}_param", "query")
+    g["headers"] = st.session_state.get(f"{prefix}_headers", "")
+    g["body"] = st.session_state.get(f"{prefix}_body", "")
+    g["parse"] = st.session_state.get(f"{prefix}_parse", "")
+
+    g["tested"] = bool(st.session_state.get(f"{prefix}_tested", False))
+    g["last_curl"] = st.session_state.get(f"{prefix}_last_curl", "")
+    g["last_result"] = st.session_state.get(f"{prefix}_last_result", None)
+    g["last_error"] = st.session_state.get(f"{prefix}_last_error", None)
+
+    fixed_key = f"{prefix}_fixed_params"
+    g["fixed_params_rows"] = st.session_state.get(fixed_key, []) or []
+
+
+def _save_current_step_snapshot():
+    # ✅ FIX: 이동/버튼 액션 전에 “현재 입력값”을 store로 스냅샷
+    step = st.session_state.current_step
+    if step == 1:
+        _save_keywords_to_store()
+    elif step == 2:
+        _save_group_widgets_to_store("control")
+    elif step == 3:
+        _save_group_widgets_to_store("experimental")
+
+
 # =====================================================
 # Page Entry
 # =====================================================
@@ -78,19 +177,13 @@ def _init_state():
     if "current_step" not in st.session_state:
         st.session_state.current_step = 1
 
+    # ✅ FIX: store init
+    _init_settings_store()
+
     # ✅ step completion flags (Next gate)
-    if "step_2a_completed" not in st.session_state:
-        st.session_state.step_2a_completed = False
-    if "step_2b_completed" not in st.session_state:
-        st.session_state.step_2b_completed = False
+    st.session_state.setdefault("step_2a_completed", False)
+    st.session_state.setdefault("step_2b_completed", False)
 
-    # ✅ tested flags (optional UI)
-    if "control_tested" not in st.session_state:
-        st.session_state.control_tested = False
-    if "experimental_tested" not in st.session_state:
-        st.session_state.experimental_tested = False
-
-    # ✅ generation results persistence
     if "generated_payload" not in st.session_state:
         st.session_state.generated_payload = None
 
@@ -98,26 +191,22 @@ def _init_state():
 def _can_go_next(step: int) -> bool:
     if step == 1:
         return bool(get_keywords())
-
     if step == 2:
         return bool(st.session_state.step_2a_completed)
-
     if step == 3:
         return bool(st.session_state.step_2b_completed)
-
     if step == 4:
-        # review는 generation으로 넘어가게 허용(키워드+양쪽 step 완료 조건)
         return bool(get_keywords()) and st.session_state.step_2a_completed and st.session_state.step_2b_completed
-
-    # step 5는 next 없음
     return False
 
 
 def _go_prev():
+    _save_current_step_snapshot()  # ✅ FIX
     st.session_state.current_step = max(1, st.session_state.current_step - 1)
 
 
 def _go_next():
+    _save_current_step_snapshot()  # ✅ FIX
     st.session_state.current_step = min(len(STEPS), st.session_state.current_step + 1)
 
 
@@ -151,6 +240,9 @@ def _render_stepper(current_step: int):
 
 
 def _on_next_clicked():
+    # ✅ FIX: Next 클릭 시점에도 스냅샷
+    _save_current_step_snapshot()
+
     step = st.session_state.current_step
 
     if _can_go_next(step):
@@ -176,7 +268,6 @@ def _render_wizard_nav():
     is_first = (step == 1)
     is_last = (step == len(STEPS))
 
-    # ✅ Next가 맨 오른쪽, Back이 그 왼쪽
     spacer, c_back, c_next = st.columns([0.78, 0.10, 0.12], gap="small", vertical_alignment="center")
 
     with c_back:
@@ -193,6 +284,9 @@ def _render_wizard_nav():
 # STEP 1. Keyword
 # =====================================================
 def _render_step_keywords():
+    # ✅ FIX: store -> widgets
+    _load_widgets_from_store_for_keywords()
+
     left, right = st.columns([0.42, 0.58], gap="large", vertical_alignment="top")
 
     with left:
@@ -220,10 +314,11 @@ def _render_step_keywords():
                 ["텍스트 직접 입력", "텍스트 파일 업로드", "CSV 파일 업로드"],
                 key="kw_method"
             )
+
         delimiter = st.session_state.get("kw_delim", ",")
         if method != "CSV 파일 업로드":
             with top2:
-                delimiter = st.text_input("구분자", value=delimiter, help="예: , | ; 또는 \\n", key="kw_delim")
+                delimiter = st.text_input("구분자", help="예: , | ; 또는 \\n", key="kw_delim")
 
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
@@ -257,6 +352,8 @@ def _render_step_keywords():
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
         if st.button("키워드 로드", type="primary", use_container_width=True):
+            _save_keywords_to_store()  # ✅ FIX: 버튼 클릭 직전도 저장
+
             if method == "텍스트 직접 입력":
                 if not text_input or not text_input.strip():
                     st.warning("키워드를 입력해주세요.")
@@ -280,38 +377,32 @@ def _render_step_keywords():
 
 
 # =====================================================
-# Helpers - Config I/O
+# Helpers - Config I/O (✅ FIX: now reads from store, not raw widget state)
 # =====================================================
 def _cfg(prefix: str) -> dict:
-    """Read current group config from session_state using a stable prefix."""
-    fixed_key = f"{prefix}_fixed_params"
-    fixed_rows = st.session_state.get(fixed_key, [])
+    # store를 신뢰 (렌더링/조건부 위젯 영향 없음)
+    g = st.session_state.ab_settings[prefix]
+
+    fixed_rows = g.get("fixed_params_rows", []) or []
     fixed_params = {r.get("k"): r.get("v") for r in fixed_rows if (r.get("k") or "").strip()}
 
-    headers_text = st.session_state.get(f"{prefix}_headers", "")
-    body_text = st.session_state.get(f"{prefix}_body", "")
+    headers_text = g.get("headers", "") or ""
+    body_text = g.get("body", "") or ""
 
     return {
-        "method": st.session_state.get(f"{prefix}_method", "GET"),
-        "url": st.session_state.get(f"{prefix}_url", ""),
-        "keyword_param": st.session_state.get(f"{prefix}_param", "query"),
+        "method": g.get("method", "GET"),
+        "url": g.get("url", ""),
+        "keyword_param": g.get("param", "query"),
         "fixed_params": fixed_params,
         "headers": parse_json_string(headers_text) if headers_text else None,
         "base_body": parse_json_string(body_text) if body_text else None,
-        "parse_path": st.session_state.get(f"{prefix}_parse", ""),
-        "tested": bool(st.session_state.get(f"{prefix}_tested", False)),
-        "last_curl": st.session_state.get(f"{prefix}_last_curl", ""),
+        "parse_path": g.get("parse", ""),
+        "tested": bool(g.get("tested", False)),
+        "last_curl": g.get("last_curl", ""),
     }
 
 
-def _ensure_fixed_rows(prefix: str):
-    fixed_key = f"{prefix}_fixed_params"
-    if fixed_key not in st.session_state:
-        st.session_state[fixed_key] = []
-
-
 def _build_request_for_keyword(prefix: str, keyword: str):
-    """Return (call_url, method, keyword_param, headers, body, curl_display)"""
     cfg = _cfg(prefix)
     method = cfg["method"]
     url = (cfg["url"] or "").strip()
@@ -322,15 +413,12 @@ def _build_request_for_keyword(prefix: str, keyword: str):
     base_body = cfg["base_body"] if isinstance(cfg["base_body"], dict) else {}
 
     if method == "GET":
-        # 고정 파라미터는 URL query로
         call_url = merge_query_params(url, fixed_params)
         curl_url = merge_query_params(call_url, {keyword_param: keyword})
         body = None
         curl = build_curl("GET", curl_url, headers, None)
         return call_url, "GET", keyword_param, headers, body, curl
 
-    # POST: 고정 파라미터는 body(query_body)로 + keyword_param은 make_api_call이 넣는 방식 유지
-    # (base_body + fixed_params만 넘기고 keyword는 make_api_call의 keyword/keyword_param 인자로 주입)
     body = dict(base_body)
     body.update(fixed_params)
     curl_body = dict(body)
@@ -347,11 +435,12 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
         st.warning("먼저 검색 키워드를 설정해주세요.")
         return
 
-    _ensure_fixed_rows(group_prefix)
+    # ✅ FIX: store -> widgets (이게 없으면 Prev/Next 복원 안됨)
+    _load_widgets_from_store_for_group(group_prefix)
+
     keywords = get_keywords()
     example_kw = keywords[0] if keywords else ""
 
-    # persistence keys
     last_result_key = f"{group_prefix}_last_result"
     last_curl_key = f"{group_prefix}_last_curl"
     last_error_key = f"{group_prefix}_last_error"
@@ -399,7 +488,6 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
 
         st.text_input(
             "검색 키워드 파라미터명 (1단계 설정 키워드 순차 호출 대상 필드)",
-            value=st.session_state.get(f"{group_prefix}_param", "query"),
             help=f"예: query / q / keyword (테스트 예시: {example_kw})",
             key=f"{group_prefix}_param"
         )
@@ -448,10 +536,13 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
                     with cc3:
                         if st.button("삭제", key=f"{fixed_rows_key}_del_{i}"):
                             st.session_state[fixed_rows_key].pop(i)
+                            # ✅ FIX: delete도 저장 반영
+                            _save_group_widgets_to_store(group_prefix)
                             st.rerun()
 
             if st.button("＋ 파라미터 추가", use_container_width=True, key=f"{fixed_rows_key}_add"):
                 st.session_state[fixed_rows_key].append({"k": "", "v": ""})
+                _save_group_widgets_to_store(group_prefix)  # ✅ FIX
                 st.rerun()
 
         with st.expander("고급 요청 설정", expanded=False):
@@ -460,12 +551,11 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
                 st.text_area("기본 Request Body (JSON)", height=110, key=f"{group_prefix}_body")
 
         st.text_input(
-            "응답 파싱 경로 (선택)",
+            "테스트 데이터 응답 파싱 경로 (선택)",
             placeholder="예: data.items.0.title",
             key=f"{group_prefix}_parse"
         )
 
-        # status badge (항상 현재 상태 기반)
         tested = bool(st.session_state.get(f"{group_prefix}_tested", False))
         st.markdown(
             "<span class='badge done'>테스트 성공</span>" if tested else "<span class='badge todo'>미테스트</span>",
@@ -473,13 +563,18 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
         )
 
         if st.button("API 테스트 실행", type="primary", use_container_width=True, key=f"{group_prefix}_test"):
+            # ✅ FIX: 테스트 실행 전 현재 입력값을 store로 스냅샷 (5번에서 반드시 필요)
+            _save_group_widgets_to_store(group_prefix)
+
             st.session_state[last_error_key] = None
+            st.session_state.ab_settings[group_prefix]["last_error"] = None  # store에도 반영
 
             cfg = _cfg(group_prefix)
             url = (cfg["url"] or "").strip()
             if not url:
                 st.session_state[last_error_key] = "API Endpoint를 입력해주세요."
                 st.session_state[f"{group_prefix}_tested"] = False
+                _save_group_widgets_to_store(group_prefix)
                 st.rerun()
 
             try:
@@ -502,13 +597,20 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
                 st.session_state[f"{group_prefix}_tested"] = ok
 
                 if ok:
-                    # step completed flags for Next gate
                     if step_key == "2a":
                         st.session_state.step_2a_completed = True
                     elif step_key == "2b":
                         st.session_state.step_2b_completed = True
 
-                    set_step_completed(step_key, True)
+                    # 외부 세션 매니저가 숫자만 받는 경우도 대비
+                    try:
+                        set_step_completed(step_no, True)
+                    except Exception:
+                        pass
+                    try:
+                        set_step_completed(step_key, True)
+                    except Exception:
+                        pass
                 else:
                     st.session_state[last_error_key] = result.get("error", "호출 실패")
 
@@ -516,9 +618,10 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
                 st.session_state[last_error_key] = str(e)
                 st.session_state[f"{group_prefix}_tested"] = False
 
+            # ✅ FIX: 결과/상태 포함해서 store에 저장
+            _save_group_widgets_to_store(group_prefix)
             st.rerun()
 
-        # ----- Result display (persisted) -----
         if st.session_state.get(last_curl_key):
             with st.expander("curl 호출 방식", expanded=True):
                 st.code(st.session_state[last_curl_key], language="bash")
@@ -546,20 +649,19 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
 
 
 # =====================================================
-# STEP 4. Review (상용서비스급 정리)
+# STEP 4. Review
 # =====================================================
 def _render_step_review():
+    # ✅ FIX: Review 진입 시점에 마지막 스냅샷 (2/3에서 입력하고 바로 Next로 온 경우도 안전)
+    _save_current_step_snapshot()
+
     left, right = st.columns([0.42, 0.58], gap="large", vertical_alignment="top")
 
     with left:
         st.markdown("<div class='step-title'>4. Review</div>", unsafe_allow_html=True)
-        st.markdown(
-            "<div class='sub'>현재 설정된 키워드/그룹 설정을 최종 확인합니다.</div>",
-            unsafe_allow_html=True
-        )
+        st.markdown("<div class='sub'>현재 설정된 키워드/그룹 설정을 최종 확인합니다.</div>", unsafe_allow_html=True)
 
     with right:
-        # Keywords summary
         kws = get_keywords() or []
         st.markdown("### Search Keywords")
         if kws:
@@ -572,7 +674,6 @@ def _render_step_review():
 
         st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
-        # Group configs
         for g in GROUPS:
             name = g["name"]
             prefix = g["prefix"]
@@ -617,6 +718,9 @@ def _render_step_review():
 # STEP 5. Test Data Generation
 # =====================================================
 def _render_step_generation():
+    # ✅ FIX: Generation도 진입 시점에 스냅샷
+    _save_current_step_snapshot()
+
     left, right = st.columns([0.42, 0.58], gap="large", vertical_alignment="top")
 
     with left:
@@ -640,9 +744,16 @@ def _render_step_generation():
             st.warning("키워드가 없습니다. 1단계에서 키워드를 먼저 로드해주세요.")
             return
 
-        # gate check
         if not (st.session_state.step_2a_completed and st.session_state.step_2b_completed):
             st.warning("Control/Experimental 설정을 완료(테스트 성공)한 뒤에 생성할 수 있습니다.")
+            return
+
+        # ✅ FIX: 여기서도 store 기반 config를 다시 읽어 검증 가능
+        control_cfg = _cfg("control")
+        exp_cfg = _cfg("experimental")
+
+        if not (control_cfg.get("url") and exp_cfg.get("url")):
+            st.error("Control/Experimental Endpoint가 비어있습니다. Step 2/3 설정을 확인해주세요.")
             return
 
         st.markdown("### Generate")
@@ -656,13 +767,8 @@ def _render_step_generation():
             results = []
             total = len(kws)
 
-            # configs snapshot
-            control_cfg = _cfg("control")
-            exp_cfg = _cfg("experimental")
-
             for idx, kw in enumerate(kws, start=1):
                 status.write(f"Generating... ({idx}/{total}) — `{kw}`")
-
                 row = {"keyword": kw, "control": {}, "experimental": {}}
 
                 # Control
@@ -673,16 +779,17 @@ def _render_step_generation():
                 row["control"]["success"] = bool(c_res.get("success"))
                 row["control"]["status"] = c_res.get("status")
                 row["control"]["error"] = c_res.get("error")
-                row["control"]["raw"] = c_res.get("data") if c_res.get("success") else None
+                # row["control"]["raw"] = c_res.get("data") if c_res.get("success") else None
+
                 c_parse = control_cfg.get("parse_path") or ""
                 if c_res.get("success"):
                     if c_parse:
                         try:
-                            row["control"]["parsed"] = parse_json_path(c_res.get("data"), c_parse)
+                            row["control"]["result"] = parse_json_path(c_res.get("data"), c_parse)
                         except Exception as e:
                             row["control"]["parsed_error"] = str(e)
                     else:
-                        row["control"]["parsed"] = c_res.get("data")
+                        row["control"]["result"] = c_res.get("data")
 
                 # Experimental
                 e_url, e_method, e_kp, e_headers, e_body, e_curl = _build_request_for_keyword("experimental", kw)
@@ -692,16 +799,17 @@ def _render_step_generation():
                 row["experimental"]["success"] = bool(e_res.get("success"))
                 row["experimental"]["status"] = e_res.get("status")
                 row["experimental"]["error"] = e_res.get("error")
-                row["experimental"]["raw"] = e_res.get("data") if e_res.get("success") else None
+                # row["experimental"]["raw"] = e_res.get("data") if e_res.get("success") else None
+
                 e_parse = exp_cfg.get("parse_path") or ""
                 if e_res.get("success"):
                     if e_parse:
                         try:
-                            row["experimental"]["parsed"] = parse_json_path(e_res.get("data"), e_parse)
+                            row["experimental"]["result"] = parse_json_path(e_res.get("data"), e_parse)
                         except Exception as e:
                             row["experimental"]["parsed_error"] = str(e)
                     else:
-                        row["experimental"]["parsed"] = e_res.get("data")
+                        row["experimental"]["result"] = e_res.get("data")
 
                 results.append(row)
                 progress.progress(idx / total)
@@ -721,7 +829,6 @@ def _render_step_generation():
 
             st.session_state.generated_payload = payload
 
-        # show/download if exists
         if st.session_state.get("generated_payload"):
             st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
             st.markdown("### Output")
