@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "generated_at": "2026-01-12T07:37:00.953866Z",
+    "keyword_count": 1
+  },
+  "keywords": [
+    "냉장고"
+  ],
+  "control_config": {
+    "method": "POST",
+    "url": "http://localhost/search",
+    "keyword_param": "query",
+    "fixed_params": {
+      "page": "1",
+      "size": "2"
+    },
+    "headers": null,
+    "base_body": null,
+    "parse_path": "data.resultList",
+    "tested": true,
+    "last_curl": "curl -X POST \\\n  'http://localhost/search' \\\n  -d '{\"page\": \"1\", \"size\": \"2\", \"query\": \"냉장고\"}'"
+  },
+  "experimental_config": {
+    "method": "POST",
+    "url": "http://localhost/search",
+    "keyword_param": "query",
+    "fixed_params": {
+      "page": "2",
+      "size": "2"
+    },
+    "headers": null,
+    "base_body": null,
+    "parse_path": "data.resultList",
+    "tested": true,
+    "last_curl": "curl -X POST \\\n  'http://localhost/search' \\\n  -d '{\"page\": \"2\", \"size\": \"2\", \"query\": \"냉장고\"}'"
+  },
+  "results": [
+    {
+      "keyword": "냉장고",
+      "control": {
+        "curl": "curl -X POST \\\n  'http://localhost/search' \\\n  -d '{\"page\": \"1\", \"size\": \"2\", \"query\": \"냉장고\"}'",
+        "success": true,
+        "status": 200,
+        "error": null,
+        "result": [
+          {
+            "goodsNm": "인버터 일반냉장고 BM580RS [580L]",
+            "mdlNm": "BM580RS",
+            "imgPath": "https://static.local.com/1.jpg"
+          },
+          {
+            "goodsNm": "[5년무상AS] 420L 냉장고",
+            "mdlNm": "PLX-RF420SL",
+            "imgPath": "https://static.local.com/1.jpg"
+          }
+        ]
+      },
+      "experimental": {
+        "curl": "curl -X POST \\\n  'http://localhost/search' \\\n  -d '{\"page\": \"2\", \"size\": \"2\", \"query\": \"냉장고\"}'",
+        "success": true,
+        "status": 200,
+        "error": null,
+        "result": [
+          {
+            "goodsNm": "일반냉장고 B502S53.AKOR [507L]",
+            "mdlNm": "B502S53.AKOR",
+            "imgPath": "https://static.local.com/1.jpg"
+          },
+          {
+            "goodsNm": "[으뜸효율]디오스 오브제컬렉션 김치냉장고 스탠드형 Z339MEEF21 (327L  베이지  1등급)",
+            "mdlNm": "Z339MEEF21.AKOR",
+            "imgPath": "https://static.local.com/1.jpg"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+/* components_kpis.css
+   KPI box CSS
+   Namespace: kpi-*
+*/
+
+/* KPI */
+.kpi-kpi-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.kpi-kpi-card {
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 14px;
+  padding: 12px 12px;
+  background: rgba(255,255,255,0.92);
+  box-shadow: var(--shadow-soft);
+}
+.kpi-kpi-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.kpi-kpi-value {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: rgba(0,0,0,0.88);
+  line-height: 1.2;
+}
+.kpi-kpi-value-sm {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(0,0,0,0.78);
+  line-height: 1.4;
+}
