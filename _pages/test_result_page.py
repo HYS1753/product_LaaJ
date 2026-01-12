@@ -22,9 +22,7 @@ def _fmt_dt(ts: float) -> str:
 
 
 def _goto_settings():
-    # ⚠️ page 라디오/위젯과 충돌을 피하려면 on_click로만 변경
     st.session_state.page = "settings"
-    st.rerun()
 
 # -------------------------
 # Page
