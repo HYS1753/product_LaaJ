@@ -1,6 +1,5 @@
 import json
 import time
-import html
 from pathlib import Path
 from datetime import datetime
 
@@ -9,11 +8,78 @@ import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 
-# -------------------------
+# =========================================================
+# (NEW) Results JSON Parser (results[]만 사용)
+# =========================================================
+from typing import Dict, Tuple, Any, List, Optional, Callable
+
+from config.llm_client_factory import LLMProvider
+from utils.evaluator.evaluator_pipeline import EvaluationPipeline
+
+
+class ResultsJsonParser:
+    """
+    payload(json.load 결과) -> pipeline 입력(queries, results_A, results_B)로 변환
+
+    - keywords/control_config/experimental_config/meta는 무시
+    - results[]만 사용
+    - topk는 공정 비교 원칙: min(len(A), len(B), default_topk)
+    """
+
+    def __init__(self, default_topk: int = 20):
+        self.default_topk = default_topk
+
+    def parse(
+        self, payload: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]], Dict[str, List[Dict[str, Any]]]]:
+        rows = payload.get("results") or []
+
+        queries: List[Dict[str, Any]] = []
+        results_A: Dict[str, List[Dict[str, Any]]] = {}
+        results_B: Dict[str, List[Dict[str, Any]]] = {}
+
+        for idx, row in enumerate(rows):
+            query = row.get("keyword") or ""
+            qid = f"q{idx+1}"
+
+            control_list = ((row.get("control") or {}).get("result")) or []
+            exp_list = ((row.get("experimental") or {}).get("result")) or []
+
+            # ✅ raw 그대로 사용
+            A = control_list
+            B = exp_list
+
+            # ✅ 공정 비교 top-k: 둘 중 더 짧은 길이 기준
+            effective_k = min(self.default_topk, len(A), len(B))
+
+            # k가 0이면 평가 불가이므로 queries에 넣어도 pipeline에서 스킵되게 할 수도 있지만,
+            # 여기서 제외하면 더 깔끔함.
+            if effective_k <= 0:
+                continue
+
+            queries.append({"qid": qid, "query": query, "topk": effective_k})
+            results_A[qid] = A
+            results_B[qid] = B
+
+        return queries, results_A, results_B
+
+
+# =========================================================
 # Paths / utils
-# -------------------------
+# =========================================================
+def _project_root() -> Path:
+    # Path.cwd()가 프로젝트 루트라는 가정(기존 코드와 동일)
+    return Path.cwd()
+
+
 def _config_dir() -> Path:
-    return Path.cwd() / "test_config"
+    return _project_root() / "test_config"
+
+
+def _results_dir() -> Path:
+    d = _project_root() / "test_results"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _fmt_dt(ts: float) -> str:
@@ -28,20 +94,21 @@ def _goto_setting():
     st.session_state.page = "setting"
     st.rerun()
 
+
+def _goto_description():
+    # 요청: Done 누르면 "description" 페이지(임시)로 이동
+    st.session_state.page = "description"
+    st.rerun()
+
+
 def _json_pretty(obj) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2)
+
 
 def _read_json(path: str) -> dict:
     p = Path(path)
     return json.loads(p.read_text(encoding="utf-8"))
 
-def _preview_value(v):
-    """리스트/딕트/스칼라를 '미리보기 1개 + 외 n개' 형태로 정리"""
-    if isinstance(v, list):
-        if len(v) == 0:
-            return {"preview": None, "more": 0}
-        return {"preview": v[0], "more": max(0, len(v) - 1)}
-    return {"preview": v, "more": 0}
 
 def _make_summary(payload: dict) -> dict:
     meta = payload.get("meta", {}) or {}
@@ -72,20 +139,20 @@ def _make_summary(payload: dict) -> dict:
         elif e.get("success") is False:
             e_fail += 1
 
-        # ✅ 첫 row 기준 preview: 리스트면 1개만, 나머지는 ...외 N개
+        # 첫 row preview
         if i == 0:
             c_items = c.get("result")
             e_items = e.get("result")
 
             if isinstance(c_items, list) and len(c_items) > 0:
                 control_preview_item = c_items[0]
-                control_preview_total = max(0, len(c_items))
+                control_preview_total = len(c_items)
             else:
-                control_preview_item = c_items  # dict/str/None 그대로
+                control_preview_item = c_items
 
             if isinstance(e_items, list) and len(e_items) > 0:
                 experimental_preview_item = e_items[0]
-                experimental_preview_total = max(0, len(e_items))
+                experimental_preview_total = len(e_items)
             else:
                 experimental_preview_item = e_items
 
@@ -93,7 +160,6 @@ def _make_summary(payload: dict) -> dict:
         "generated_at": meta.get("generated_at"),
         "keyword_count": meta.get("keyword_count", len(keywords)),
         "keywords_preview": keywords[:10],
-
         "control": {
             "method": control.get("method"),
             "url": control.get("url"),
@@ -108,24 +174,21 @@ def _make_summary(payload: dict) -> dict:
             "parse_path": exp.get("parse_path"),
             "tested": bool(exp.get("tested", False)),
         },
-
         "results_count": len(results),
         "control_ok": c_ok,
         "control_fail": c_fail,
         "experimental_ok": e_ok,
         "experimental_fail": e_fail,
-
-        # ✅ preview (카드 내부에서 st.json으로 렌더링할 값)
-        "control_preview_item": _json_pretty(control_preview_item),
+        "control_preview_item": control_preview_item,
         "control_preview_total": control_preview_total,
-        "experimental_preview_item": _json_pretty(experimental_preview_item),
+        "experimental_preview_item": experimental_preview_item,
         "experimental_preview_total": experimental_preview_total,
     }
 
 
-# -------------------------
+# =========================================================
 # Runner stepper UI
-# -------------------------
+# =========================================================
 RUNNER_STEPS = [
     {"id": 1, "label": "Review & Confirm"},
     {"id": 2, "label": "Running"},
@@ -145,9 +208,9 @@ def _render_runner_stepper(current_step: int):
             state = "todo"
         items.append((sid, s["label"], state))
 
-    html = ["<div class='stepper stepper-fit'>"]
+    html_parts = ["<div class='stepper stepper-fit'>"]
     for i, (sid, label, state) in enumerate(items):
-        html.append(
+        html_parts.append(
             f"""
             <div class='step {state}'>
               <div class='circle'>{sid}</div>
@@ -156,38 +219,72 @@ def _render_runner_stepper(current_step: int):
             """
         )
         if i != len(items) - 1:
-            html.append("<div class='dash-line'></div>")
-    html.append("</div>")
-    st.markdown("".join(html), unsafe_allow_html=True)
+            html_parts.append("<div class='dash-line'></div>")
+    html_parts.append("</div>")
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
-# -------------------------
+# =========================================================
 # Wizard state helpers
-# -------------------------
+# =========================================================
 def _init_runner_state():
     st.session_state.setdefault("runner_mode", "list")   # "list" | "wizard"
     st.session_state.setdefault("runner_step", 1)        # 1,2,3
     st.session_state.setdefault("runner_selected_path", None)
     st.session_state.setdefault("runner_confirm_ok", False)
+
+    # job state
+    st.session_state.setdefault("runner_job_started", False)
     st.session_state.setdefault("runner_job_done", False)
+    st.session_state.setdefault("runner_job_error", None)
     st.session_state.setdefault("runner_job_log", "")
+
+    # output state
+    st.session_state.setdefault("runner_result_obj", None)      # pipeline output dict
+    st.session_state.setdefault("runner_result_path", None)     # saved json file path
+
+    # list mode selection state
+    st.session_state.setdefault("selected_test_config_path", None)
+
+    # preview dialog flags
+    st.session_state.setdefault("open_control_preview", False)
+    st.session_state.setdefault("open_experimental_preview", False)
+
+
+def _reset_wizard_state():
+    st.session_state.runner_mode = "list"
+    st.session_state.runner_step = 1
+    st.session_state.runner_selected_path = None
+    st.session_state.runner_confirm_ok = False
+
+    st.session_state.runner_job_started = False
+    st.session_state.runner_job_done = False
+    st.session_state.runner_job_error = None
+    st.session_state.runner_job_log = ""
+
+    st.session_state.runner_result_obj = None
+    st.session_state.runner_result_path = None
+
+    st.session_state.open_control_preview = False
+    st.session_state.open_experimental_preview = False
 
 
 def _start_wizard():
     st.session_state.runner_mode = "wizard"
     st.session_state.runner_step = 1
     st.session_state.runner_confirm_ok = False
+
+    st.session_state.runner_job_started = False
     st.session_state.runner_job_done = False
+    st.session_state.runner_job_error = None
     st.session_state.runner_job_log = ""
-    #st.rerun()
+
+    st.session_state.runner_result_obj = None
+    st.session_state.runner_result_path = None
 
 
 def _back_to_list():
-    st.session_state.runner_mode = "list"
-    st.session_state.runner_step = 1
-    st.session_state.runner_confirm_ok = False
-    st.session_state.runner_job_done = False
-    st.session_state.runner_job_log = ""
+    _reset_wizard_state()
     st.rerun()
 
 
@@ -197,14 +294,60 @@ def _go_step(step: int):
 
 
 def _go_result_page_mock():
-    # TODO: 실제 result 페이지 키로 연결
-    # 예) st.session_state.page = "run&result" or "result"
     st.toast("결과 페이지로 이동(목업) — 라우팅 연결 포인트입니다.", icon="✅")
 
 
-# -------------------------
+# =========================================================
+# (NEW) 실제 파이프라인 실행 helper
+# =========================================================
+def _run_pipeline_from_payload(
+    payload: Dict[str, Any],
+    progress_cb: Optional[Callable[[float], None]] = None,
+) -> Dict[str, Any]:
+    """
+    payload(results[]) -> (queries, results_A, results_B) -> pipeline.run_parallel(...)
+    """
+
+    # 프로젝트 코드에 맞춰 import 경로 조정 필요
+    # 아래는 네가 이전에 만든 구조를 전제로 함:
+    #   - EvaluationPipeline(provider=..., llm_config=..., topk=...)
+    #   - LLMProvider enum
+
+
+    parser = ResultsJsonParser(default_topk=20)
+    queries, results_A, results_B = parser.parse(payload)
+
+    # ✅ provider는 일단 기본값(원하면 step1에서 선택 UI로 확장 가능)
+    provider = LLMProvider.GEMINI
+
+    pipeline = EvaluationPipeline(
+        provider=provider,
+        topk=20,
+        progress_callback=progress_cb,
+    )
+
+    # ✅ 병렬 실행
+    # max_workers는 필요 시 session_state나 UI에서 조절 가능
+    out = pipeline.run_parallel(
+        payload=payload,
+        max_workers=8,
+    )
+    return out
+
+
+def _save_result_json(config_path: str, result_obj: Dict[str, Any]) -> Path:
+    """
+    {project_root}/test_results/{config_stem}_result.json 으로 저장
+    """
+    config_stem = Path(config_path).stem
+    out_path = _results_dir() / f"{config_stem}_result.json"
+    out_path.write_text(_json_pretty(result_obj), encoding="utf-8")
+    return out_path
+
+
+# =========================================================
 # Step 1/2/3 screens
-# -------------------------
+# =========================================================
 def _render_step1_review():
     st.markdown("<div class='step-title'>1. Review & Confirm</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub'>선택한 테스트 설정(JSON)의 핵심 정보를 확인하고 실행 여부를 선택합니다.</div>", unsafe_allow_html=True)
@@ -227,7 +370,6 @@ def _render_step1_review():
 
     name = Path(path).stem
 
-    # Summary card
     st.markdown(
         f"""
         <div class="summary-card">
@@ -279,10 +421,6 @@ def _render_step1_review():
         unsafe_allow_html=True,
     )
 
-    # ✅ 팝업 상태
-    st.session_state.setdefault("open_control_preview", False)
-    st.session_state.setdefault("open_experimental_preview", False)
-
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 
     c1, c2 = st.columns([0.5, 0.5])
@@ -294,38 +432,31 @@ def _render_step1_review():
                      use_container_width=True):
             st.session_state.open_experimental_preview = True
 
-    # ✅ Control dialog
     if st.session_state.open_control_preview:
         if hasattr(st, "dialog"):
             @st.dialog("Control data preview (1개)")
             def _dlg_c():
                 st.json(summary["control_preview_item"])
-
             _dlg_c()
         else:
             with st.expander("Control data preview (1개)", expanded=True):
                 st.json(summary["control_preview_item"])
         st.session_state.open_control_preview = False
 
-    # ✅ Experimental dialog
     if st.session_state.open_experimental_preview:
         if hasattr(st, "dialog"):
-            @st.dialog("Experimental 결과 예시 (1개)")
+            @st.dialog("Experimental data preview (1개)")
             def _dlg_e():
                 st.json(summary["experimental_preview_item"])
-
             _dlg_e()
         else:
-            with st.expander("Experimental 결과 예시 (1개)", expanded=True):
+            with st.expander("Experimental data preview (1개)", expanded=True):
                 st.json(summary["experimental_preview_item"])
         st.session_state.open_experimental_preview = False
 
     st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
-    st.checkbox(
-        "위 설정으로 테스트를 실행할게요.",
-        key="runner_confirm_ok",
-    )
+    st.checkbox("위 설정으로 테스트를 실행할게요.", key="runner_confirm_ok")
 
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 
@@ -346,55 +477,129 @@ def _render_step1_review():
 
 def _render_step2_running():
     st.markdown("<div class='step-title'>2. Running</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub'>테스트를 실행하는 단계입니다. 현재는 목업으로 진행도를 표시합니다.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub'>LLM-as-a-Judge 평가를 실행합니다. 진행 상황을 표시합니다.</div>", unsafe_allow_html=True)
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
-    # 이미 완료 상태면 3단계로
+    # 이미 완료면 3단계로
     if st.session_state.runner_job_done:
         _go_step(3)
         return
 
-    # 실행 UI
-    st.info("⏳ 테스트 실행 중... (목업)")
+    # 선택 경로 확인
+    path = st.session_state.runner_selected_path
+    if not path:
+        st.error("선택된 테스트 설정이 없습니다. 목록으로 돌아가 다시 선택해주세요.")
+        st.button("← Back", on_click=_back_to_list)
+        return
 
-    progress = st.progress(0)
+    # UI placeholders
+    progress = st.progress(0.0)
+    status = st.empty()
     log = st.empty()
 
-    # 목업 진행 (tqdm 느낌)
-    steps = 30
-    for i in range(steps):
-        time.sleep(0.05)
-        pct = int(((i + 1) / steps) * 100)
-        progress.progress((i + 1) / steps)
-        log.markdown(f"<div class='sub'>Running… <b>{pct}%</b></div>", unsafe_allow_html=True)
+    # ✅ rerun 꼬임 방지: 이미 시작했으면 재시작하지 않음
+    if st.session_state.runner_job_started:
+        status.info("⏳ 실행 중... (페이지가 rerun 되어도 작업은 이미 시작된 것으로 처리합니다)")
+        log.markdown("<div class='sub'>Running…</div>", unsafe_allow_html=True)
+        # 실제 백그라운드 실행은 하지 않으므로(스트림릿 기본), started 상태에서 여기로 돌아오면
+        # 결과가 없는 상태가 될 수 있음.
+        # 따라서 'started'는 이 함수 내부에서만 사용하고, 실행을 즉시 수행하도록 설계.
+        # 아래에서 바로 실행한다.
+        st.session_state.runner_job_started = False
 
-    st.session_state.runner_job_done = True
-    st.session_state.runner_job_log = "Mock run completed successfully."
-    st.toast("실행 완료(목업)", icon="✅")
+    # 실행 시작 플래그
+    st.session_state.runner_job_started = True
+    st.session_state.runner_job_error = None
 
-    # ✅ 완료되면 자동으로 3단계로
-    _go_step(3)
+    status.info("⏳ 테스트 실행 중...")
+
+    def _progress_cb(p: float):
+        # p: 0~1
+        progress.progress(max(0.0, min(1.0, float(p))))
+        pct = int(p * 100)
+        status.markdown(f"<div class='sub'>Running… <b>{pct}%</b></div>", unsafe_allow_html=True)
+
+    try:
+        # config payload 읽기
+        payload = _read_json(path)
+
+        # ✅ 실제 파이프라인 실행
+        result_obj = _run_pipeline_from_payload(payload, progress_cb=_progress_cb)
+
+        # ✅ 결과 저장
+        out_path = _save_result_json(path, result_obj)
+
+        # state 저장
+        st.session_state.runner_result_obj = result_obj
+        st.session_state.runner_result_path = str(out_path)
+
+        st.session_state.runner_job_done = True
+        st.session_state.runner_job_log = f"Run completed. Saved: {out_path}"
+        st.toast("✅ 실행 완료", icon="✅")
+
+        # 완료 후 step3로
+        _go_step(3)
+
+    except Exception as e:
+        st.session_state.runner_job_error = str(e)
+        st.session_state.runner_job_done = False
+        st.session_state.runner_job_started = False
+        status.error(f"실행 실패: {e}")
+        st.button("← Back", on_click=_back_to_list)
+        return
 
 
 def _render_step3_done():
     st.markdown("<div class='step-title'>3. Done</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub'>테스트 실행이 완료되었습니다. 결과 페이지로 이동할 수 있습니다.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub'>테스트 실행이 완료되었습니다. 결과 파일을 확인/다운로드할 수 있습니다.</div>", unsafe_allow_html=True)
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
     name = Path(st.session_state.runner_selected_path).stem if st.session_state.runner_selected_path else "-"
 
+    if st.session_state.runner_job_error:
+        st.error(f"❌ 테스트 실행 실패 — **{name}**")
+        st.code(st.session_state.runner_job_error)
+        st.button("← Back to list", on_click=_back_to_list, use_container_width=True)
+        return
+
     st.success(f"✅ 테스트 실행 완료 — **{name}**")
-    st.markdown(
-        """
-        <div class="section-card" style="border-radius:14px;">
-          <div style="font-size:13px; color:rgba(30,35,40,0.70); line-height:1.6;">
-            실행 결과를 확인하려면 <b>결과 페이지</b>로 이동하세요.<br/>
-            (현재 단계는 목업이며, 이후 실제 실행 로직과 결과 렌더링을 연결합니다.)
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+
+    saved_path = st.session_state.runner_result_path
+    result_obj = st.session_state.runner_result_obj
+
+    if saved_path:
+        st.markdown(
+            f"""
+            <div class="section-card" style="border-radius:14px;">
+              <div style="font-size:13px; color:rgba(30,35,40,0.70); line-height:1.6;">
+                결과가 아래 경로에 자동 저장되었습니다:<br/>
+                <b>{saved_path}</b>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.info("결과 파일 저장 경로를 찾지 못했습니다(예외 상황).")
+
+    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+    # ✅ 결과 다운로드/저장(사용자가 파일 저장 가능)
+    if result_obj is not None:
+        json_bytes = _json_pretty(result_obj).encode("utf-8")
+        st.download_button(
+            label="⬇️ 결과 JSON 다운로드",
+            data=json_bytes,
+            file_name=f"{name}_result.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+        with st.expander("결과 미리보기(summary)", expanded=False):
+            try:
+                st.json(result_obj.get("summary", result_obj))
+            except Exception:
+                st.json(result_obj)
 
     st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
@@ -411,10 +616,17 @@ def _render_step3_done():
             on_click=_go_result_page_mock,
         )
 
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 
-# -------------------------
+    # ✅ Done 버튼: state 초기화 + description 페이지 이동
+    if st.button("✅ Done", type="secondary", use_container_width=True):
+        _reset_wizard_state()
+        _goto_description()
+
+
+# =========================================================
 # Page
-# -------------------------
+# =========================================================
 def render():
     _init_runner_state()
 
@@ -441,7 +653,7 @@ def render():
         return
 
     # -------------------------
-    # List mode (기존 UI 유지 + Run Test로 wizard 진입)
+    # List mode
     # -------------------------
     files = sorted(base_dir.glob("*.json"))
     rows = []
@@ -562,9 +774,9 @@ def render():
         run_disabled = st.session_state.selected_test_config_path is None
 
         def _on_run_clicked():
-            # 선택된 설정을 wizard로 넘김
             st.session_state.runner_selected_path = st.session_state.selected_test_config_path
             _start_wizard()
+            st.rerun()
 
         st.button(
             "▶ Run Test",

@@ -2,6 +2,12 @@ import streamlit as st
 from _pages import readme_page, test_setting_page, test_runner_page
 from utils.css_loader import load_css
 from utils.session_manager import init_session_state
+from dotenv import load_dotenv
+
+# -----------------------------
+# Environment Load
+# -----------------------------
+load_dotenv()
 
 # -----------------------------
 # Page Config
