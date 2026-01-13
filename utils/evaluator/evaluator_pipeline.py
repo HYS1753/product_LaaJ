@@ -134,11 +134,13 @@ class EvaluationPipeline:
             detail_row = {
                 "qid": qid,
                 "query": query,
-                "ndcg_A": gA["ndcg"],
-                "ndcg_B": gB["ndcg"],
+                "ndcg_control": gA["ndcg"],
+                "ndcg_experimental": gB["ndcg"],
                 "ndcg_diff": ndcg_diff,
-                "grades_A": gA["grades"],
-                "grades_B": gB["grades"],
+                "grades_control": gA["grades"],
+                "grades_experimental": gB["grades"],
+                "notes_control": gA["notes"],
+                "notes_experimental": gB["notes"],
             }
 
             return pairwise_row, detail_row, ndcg_diff
@@ -203,25 +205,36 @@ class EvaluationPipeline:
         mean_ndcg_diff = statistics.mean(ndcg_samples) if ndcg_samples else 0.0
         ci_lo, ci_hi = Metrics.bootstrap_ci(ndcg_samples) if ndcg_samples else (0.0, 0.0)
 
+        # 결과 정렬
+        pairwise_results_sorted = sorted(
+            pairwise_results,
+            key=lambda d: int(str(d.get("qid", "")).lstrip("q") or 10 ** 9)
+        )
+
+        query_details_sorted = sorted(
+            query_details,
+            key=lambda d: int(str(d.get("qid", "")).lstrip("q") or 10 ** 9)
+        )
+
         return {
             "summary": {
                 "total_queries": total,
                 "evaluated_queries": len(pairwise_results),
                 "pairwise": {
-                    "win_A": wA,
-                    "win_B": wB,
+                    "win_control": wA,
+                    "win_experimental": wB,
                     "tie": wT,
-                    "winrate_A": round(winrate_A, 4),
+                    "winrate_control": round(winrate_A, 4),
                     "bradley_terry_score": round(bt_score, 4),
-                    "bradley_terry_prob_A": round(bt_prob, 4),
+                    "bradley_terry_prob_control": round(bt_prob, 4),
                 },
                 "ndcg": {
-                    "mean_diff_A_minus_B": round(mean_ndcg_diff, 4),
+                    "mean_diff_control_minus_experimental": round(mean_ndcg_diff, 4),
                     "ci_95_lower": round(ci_lo, 4),
                     "ci_95_upper": round(ci_hi, 4),
                 },
             },
-            "pairwise_results": pairwise_results,
-            "query_details": query_details,
+            "pairwise_results": pairwise_results_sorted,
+            "query_details": query_details_sorted,
             "config": {"topk": self.topk},
         }

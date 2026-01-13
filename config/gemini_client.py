@@ -15,7 +15,7 @@ class GeminiClient:
     ):
         # 1. 환경 변수 또는 사용자 입력값으로 설정 (우선순위: 사용자 입력 > .env)
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.model_name = model_name or os.getenv("GEMINI_API_MODEL", "gemini-2.0-flash")
+        self.model_name = model_name or os.getenv("GEMINI_API_MODEL", "gemini-2.5-flash")
 
         # 환경 변수에서 가져올 때 숫자로 변환 (기본값 설정)
         env_temp = os.getenv("GEMINI_API_TEMPERATURE", "0.0")

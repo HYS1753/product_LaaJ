@@ -6,62 +6,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
-
-
-# =========================================================
-# (NEW) Results JSON Parser (results[]만 사용)
-# =========================================================
 from typing import Dict, Tuple, Any, List, Optional, Callable
 
 from config.llm_client_factory import LLMProvider
 from utils.evaluator.evaluator_pipeline import EvaluationPipeline
-
-
-class ResultsJsonParser:
-    """
-    payload(json.load 결과) -> pipeline 입력(queries, results_A, results_B)로 변환
-
-    - keywords/control_config/experimental_config/meta는 무시
-    - results[]만 사용
-    - topk는 공정 비교 원칙: min(len(A), len(B), default_topk)
-    """
-
-    def __init__(self, default_topk: int = 20):
-        self.default_topk = default_topk
-
-    def parse(
-        self, payload: Dict[str, Any]
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]], Dict[str, List[Dict[str, Any]]]]:
-        rows = payload.get("results") or []
-
-        queries: List[Dict[str, Any]] = []
-        results_A: Dict[str, List[Dict[str, Any]]] = {}
-        results_B: Dict[str, List[Dict[str, Any]]] = {}
-
-        for idx, row in enumerate(rows):
-            query = row.get("keyword") or ""
-            qid = f"q{idx+1}"
-
-            control_list = ((row.get("control") or {}).get("result")) or []
-            exp_list = ((row.get("experimental") or {}).get("result")) or []
-
-            # ✅ raw 그대로 사용
-            A = control_list
-            B = exp_list
-
-            # ✅ 공정 비교 top-k: 둘 중 더 짧은 길이 기준
-            effective_k = min(self.default_topk, len(A), len(B))
-
-            # k가 0이면 평가 불가이므로 queries에 넣어도 pipeline에서 스킵되게 할 수도 있지만,
-            # 여기서 제외하면 더 깔끔함.
-            if effective_k <= 0:
-                continue
-
-            queries.append({"qid": qid, "query": query, "topk": effective_k})
-            results_A[qid] = A
-            results_B[qid] = B
-
-        return queries, results_A, results_B
+from utils.evaluator.result_json_parser import ResultsJsonParser
 
 
 # =========================================================
@@ -90,16 +39,18 @@ def _fmt_dt(ts: float) -> str:
 
 
 def _goto_setting():
-    # ⚠️ app 라우팅 키에 맞춰 수정 필요할 수 있음
+    _reset_wizard_state()
     st.session_state.page = "setting"
-    st.rerun()
-
+    # st.rerun()
 
 def _goto_description():
-    # 요청: Done 누르면 "description" 페이지(임시)로 이동
+    _reset_wizard_state()
     st.session_state.page = "description"
-    st.rerun()
+    # st.rerun()
 
+def _goto_results():
+    _reset_wizard_state()
+    st.session_state.page = "results"
 
 def _json_pretty(obj) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2)
@@ -285,17 +236,12 @@ def _start_wizard():
 
 def _back_to_list():
     _reset_wizard_state()
-    st.rerun()
+    # st.rerun()
 
 
 def _go_step(step: int):
     st.session_state.runner_step = step
-    st.rerun()
-
-
-def _go_result_page_mock():
-    st.toast("결과 페이지로 이동(목업) — 라우팅 연결 포인트입니다.", icon="✅")
-
+    # st.rerun()
 
 # =========================================================
 # (NEW) 실제 파이프라인 실행 helper
@@ -340,7 +286,8 @@ def _save_result_json(config_path: str, result_obj: Dict[str, Any]) -> Path:
     {project_root}/test_results/{config_stem}_result.json 으로 저장
     """
     config_stem = Path(config_path).stem
-    out_path = _results_dir() / f"{config_stem}_result.json"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = _results_dir() / f"{config_stem}_result_{ts}.json"
     out_path.write_text(_json_pretty(result_obj), encoding="utf-8")
     return out_path
 
@@ -482,7 +429,7 @@ def _render_step2_running():
 
     # 이미 완료면 3단계로
     if st.session_state.runner_job_done:
-        _go_step(3)
+        st.session_state.runner_step = 3
         return
 
     # 선택 경로 확인
@@ -538,7 +485,8 @@ def _render_step2_running():
         st.toast("✅ 실행 완료", icon="✅")
 
         # 완료 후 step3로
-        _go_step(3)
+        st.session_state.runner_step = 3
+        st.rerun()
 
     except Exception as e:
         st.session_state.runner_job_error = str(e)
@@ -584,17 +532,71 @@ def _render_step3_done():
 
     st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
-    # ✅ 결과 다운로드/저장(사용자가 파일 저장 가능)
+    # ✅ 결과 서버 저장 UI (Step5 스타일)
     if result_obj is not None:
-        json_bytes = _json_pretty(result_obj).encode("utf-8")
-        st.download_button(
-            label="⬇️ 결과 JSON 다운로드",
-            data=json_bytes,
-            file_name=f"{name}_result.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+        st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+        st.markdown("### Output")
 
+        # 1) 기본 저장 경로 안내 (Step2에서 자동 저장된 경로)
+        saved_path = st.session_state.get("runner_result_path", "")
+        if saved_path:
+            st.info(
+                f"✅ 결과 JSON이 아래 위치에 저장 완료되었습니다.\n\n"
+                f"- 저장 경로: `{saved_path}`\n\n"
+                f"다른 위치에 저장하려면 아래에서 경로/파일명을 지정해 저장하세요."
+            )
+
+        # 2) 다른 위치 저장 UI (접기/펼치기)
+        st.session_state.setdefault("show_alt_save_result", False)
+
+        if not st.session_state.show_alt_save_result:
+            if st.button("서버에 다른 위치로 저장", use_container_width=True, key="open_alt_save_result"):
+                st.session_state.show_alt_save_result = True
+                st.rerun()
+        else:
+            st.markdown("#### 다른 위치로 저장")
+
+            default_dir = str(_results_dir())
+            alt_dir = st.text_input("저장 폴더(서버 경로)", value=default_dir, key="alt_save_result_dir")
+
+            # 파일명 기본값: {name}_result_YYYYMMDDHHMMSS.json (현재 자동 저장 규칙과 맞춤)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"{name}_result_{ts}.json"
+            alt_file = st.text_input("파일명", value=default_name, key="alt_save_result_name")
+
+            save_notice = st.empty()
+
+            c_cancel, c_save = st.columns([0.35, 0.65], gap="small")
+            with c_cancel:
+                if st.button("취소", use_container_width=True, key="close_alt_save_result"):
+                    st.session_state.show_alt_save_result = False
+                    st.rerun()
+
+            with c_save:
+                if st.button("저장", type="primary", use_container_width=True, key="do_alt_save_result"):
+                    try:
+                        out_dir2 = Path(alt_dir)
+                        out_dir2.mkdir(parents=True, exist_ok=True)
+
+                        filename = alt_file.strip()
+                        if not filename.lower().endswith(".json"):
+                            filename += ".json"
+
+                        out_path2 = out_dir2 / filename
+                        out_path2.write_text(_json_pretty(result_obj), encoding="utf-8")
+
+                        save_notice.success(f"✅ 저장 완료: {out_path2}")
+
+                        # ✅ 새 저장 경로로 갱신해주면 UX 좋음
+                        st.session_state.runner_result_path = str(out_path2)
+
+                        st.session_state.show_alt_save_result = False
+                        st.rerun()
+
+                    except Exception as e:
+                        save_notice.error(f"저장 실패: {e}")
+
+        # 3) 결과 미리보기는 유지
         with st.expander("결과 미리보기(summary)", expanded=False):
             try:
                 st.json(result_obj.get("summary", result_obj))
@@ -603,25 +605,18 @@ def _render_step3_done():
 
     st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns([0.25, 0.45, 0.30], vertical_alignment="center")
+    c1, c2, c3 = st.columns([0.78, 0.10, 0.12], gap="small", vertical_alignment="center")
     with c1:
-        st.button("← Back", use_container_width=True, on_click=_back_to_list)
+        st.caption("Done 버튼을 눌러 결과 페이지를 확인하세요.")
     with c2:
-        st.caption("결과 페이지 라우팅 키를 연결하면 바로 이동하도록 만들 수 있어요.")
+        st.button("← Back", use_container_width=True, on_click=_back_to_list)
     with c3:
         st.button(
-            "결과 페이지로 이동",
+            "Done",
             type="primary",
             use_container_width=True,
-            on_click=_go_result_page_mock,
+            on_click=_goto_results,
         )
-
-    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
-
-    # ✅ Done 버튼: state 초기화 + description 페이지 이동
-    if st.button("✅ Done", type="secondary", use_container_width=True):
-        _reset_wizard_state()
-        _goto_description()
 
 
 # =========================================================
@@ -776,7 +771,7 @@ def render():
         def _on_run_clicked():
             st.session_state.runner_selected_path = st.session_state.selected_test_config_path
             _start_wizard()
-            st.rerun()
+            # st.rerun()
 
         st.button(
             "▶ Run Test",
