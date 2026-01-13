@@ -1,5 +1,5 @@
 import streamlit as st
-from _pages import readme_page, test_setting_page, test_runner_page
+from _pages import readme_page, test_setting_page, test_runner_page, test_result_page
 from utils.css_loader import load_css
 from utils.session_manager import init_session_state
 from dotenv import load_dotenv
@@ -51,13 +51,14 @@ with st.sidebar:
 
     page = st.radio(
         "navigation",
-        ["description", "setting", "runner"],  # 🔴 내부 값 = state 값
+        ["description", "setting", "runner", "results"],  # 🔴 내부 값 = state 값
         label_visibility="collapsed",
         key="page",  # 🔴 기존 state 그대로 사용
         format_func=lambda x: {
-            "description": "📖ㅤDescription",
-            "setting": "⚙️ㅤTest Setting",
-            "runner": "🚀ㅤTest Runner", # 📊
+            "description": "📖ㅤDescriptionㅤㅤ",
+            "setting": "⚙️ㅤTest Settingㅤㅤ",
+            "runner": "🚀ㅤTest Runnerㅤㅤ",
+            "results": "📊ㅤTest Resultsㅤㅤ"
         }[x],
     )
 
@@ -70,3 +71,5 @@ elif st.session_state.page == "setting":
     test_setting_page.render()
 elif st.session_state.page == "runner":
     test_runner_page.render()
+elif st.session_state.page == "results":
+    test_result_page.render()
