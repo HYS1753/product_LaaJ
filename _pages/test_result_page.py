@@ -8,6 +8,10 @@ from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 import matplotlib.pyplot as plt
 
+from config.gemini_client import GeminiClient
+from utils.analyzer.analyze_report_with_llm import analyze_report_with_llm
+from utils.markdown_wrapper import unwrap_markdown
+
 
 # =========================================================
 # Paths
@@ -416,15 +420,49 @@ def _render_overview(report: dict, control_label: str, exp_label: str):
                 """,
             unsafe_allow_html=True,
         )
+    st.divider()
 
-        st.markdown("#### 권장 액션")
-        st.markdown(
-            f"""
-    - **Pairwise reason**에서 반복적으로 등장하는 **노이즈/비관련 패턴**을 우선 제거하세요.  
-    - **nDCG diff가 큰 쿼리**를 먼저 보면서, grading notes로 **어떤 유형이 감점되는지** 확인하세요.  
-    - Top/Bottom에 자주 등장하는 쿼리는 **리콜/정확도 개선 타겟**으로 삼기 좋습니다.
-                """
+    # =====================================================
+    # (4) Detail LLM Analyzed interpretation row: 좌(타이틀) / 우(가독성 있게 카드/불릿)
+    # =====================================================
+    r4_l, r4_r = st.columns([4, 6], gap="large", vertical_alignment="top")
+
+    with r4_l:
+        st.markdown("### LLM Analyzed Report")
+        st.caption(
+            """
+            Pairwise / Bradley–Terry / nDCG 결과를 종합해 LLM 을 통해 분석합니다.
+            결과를 원하시면 오른쪽 분석 생성 버튼을 눌러주세요.
+            """
         )
+
+    with r4_r:
+        st.markdown("### ")
+
+        st.session_state.setdefault("llm_analysis_cache_md", {})  # {path: markdown}
+
+        selected_path = st.session_state.get("results_selected_path")
+        cache_md = st.session_state.llm_analysis_cache_md
+
+        colA, colB = st.columns([0.8, 0.2])
+        with colB:
+            run_analysis = st.button("분석 생성", type="primary", use_container_width=True)
+
+        report_md = cache_md.get(selected_path) if selected_path else None
+
+    if run_analysis:
+        with st.spinner("LLM이 결과를 한국어로 분석 중입니다..."):
+            llm_client = GeminiClient()
+            report_md = analyze_report_with_llm(report, control_label, exp_label, llm_client)
+            report_md_unwrap = unwrap_markdown(report_md)
+            if selected_path:
+                cache_md[selected_path] = report_md
+                st.session_state.llm_analysis_cache_md = cache_md
+
+    if report_md:
+        st.markdown(report_md_unwrap)
+    else:
+        st.info("‘분석 생성’을 누르면, LLM 을 통한 보다 자세한 한국어 결과 해석 리포트를 생성합니다.")
 
 
 def _render_pairwise_detail(report: dict, control_label: str, exp_label: str):

@@ -56,3 +56,24 @@ class GeminiClient:
 
         print(f"최종 실패: {last_err}")
         return {}
+
+    def generate_text(self, system_prompt: str, user_prompt: str) -> str:
+        last_err = None
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=self.temperature,
+                        # ✅ JSON 강제하지 않음
+                    ),
+                )
+                return (response.text or "").strip()
+            except Exception as e:
+                last_err = e
+                print(f"오류 발생 (시도 {attempt + 1}/{self.max_retries}): {e}")
+                time.sleep(1.5 * (attempt + 1))
+        print(f"최종 실패: {last_err}")
+        return ""
