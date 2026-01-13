@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import List
 import streamlit as st
 
 from utils.keyword_loader import (
@@ -138,6 +139,27 @@ def _save_current_step_snapshot():
     elif step == 3:
         _save_group_widgets_to_store("experimental")
 
+def _parse_keyword_params(raw: str) -> List[str]:
+    """
+    "query, sparseQuery" / "query sparseQuery" / "query|sparseQuery" 등
+    다양한 입력을 받아 키 목록으로 정리
+    """
+    if not raw:
+        return []
+    # 콤마/공백/파이프/줄바꿈 지원
+    seps = [",", "|", "\n", "\t"]
+    s = raw
+    for sep in seps:
+        s = s.replace(sep, " ")
+    keys = [x.strip() for x in s.split(" ") if x.strip()]
+    # 중복 제거 (순서 유지)
+    seen = set()
+    out = []
+    for k in keys:
+        if k not in seen:
+            out.append(k)
+            seen.add(k)
+    return out
 
 # =====================================================
 # Page Entry
@@ -502,29 +524,81 @@ def _cfg(prefix: str) -> dict:
     }
 
 
+from typing import List
+
+def _parse_keyword_params(raw: str) -> List[str]:
+    """
+    "query, sparseQuery" / "query sparseQuery" / "query|sparseQuery" 등
+    다양한 입력을 받아 키 목록으로 정리
+    """
+    if not raw:
+        return []
+    s = str(raw).strip()
+
+    # 구분자들을 공백으로 통일
+    for sep in [",", "|", "\n", "\t"]:
+        s = s.replace(sep, " ")
+
+    keys = [x.strip() for x in s.split(" ") if x.strip()]
+
+    # 중복 제거(순서 유지)
+    seen = set()
+    out = []
+    for k in keys:
+        if k not in seen:
+            out.append(k)
+            seen.add(k)
+    return out
+
+
 def _build_request_for_keyword(prefix: str, keyword: str):
     cfg = _cfg(prefix)
     method = cfg["method"]
     url = (cfg["url"] or "").strip()
-    keyword_param = cfg["keyword_param"]
-    headers = cfg["headers"]
 
+    # ✅ 기존: keyword_param 문자열 1개
+    # keyword_param = cfg["keyword_param"]
+
+    # ✅ 변경: 여러 param 지원
+    raw_param = cfg.get("keyword_param", "")
+    keyword_params = _parse_keyword_params(raw_param)
+
+    headers = cfg["headers"]
     fixed_params = cfg["fixed_params"] or {}
     base_body = cfg["base_body"] if isinstance(cfg["base_body"], dict) else {}
 
+    # 키워드 파라미터가 비어있으면 fallback (원하면 제거 가능)
+    if not keyword_params:
+        keyword_params = ["query"]
+
     if method == "GET":
+        # ✅ call_url: fixed_params까지 합친 "기본 호출 url"
         call_url = merge_query_params(url, fixed_params)
-        curl_url = merge_query_params(call_url, {keyword_param: keyword})
+
+        # ✅ curl_url: keyword 파라미터 여러 개를 넣은 "테스트용 curl url"
+        kw_params_dict = {kp: keyword for kp in keyword_params}
+        curl_url = merge_query_params(call_url, kw_params_dict)
+
         body = None
         curl = build_curl("GET", curl_url, headers, None)
-        return call_url, "GET", keyword_param, headers, body, curl
 
+        # ✅ 반환값의 keyword_param은 '문자열 1개'로 쓰던 흔적이므로
+        #    하위 호환을 위해 원본 raw_param 그대로 반환 (또는 "," join)
+        return call_url, "GET", raw_param, headers, body, curl
+
+    # POST
     body = dict(base_body)
     body.update(fixed_params)
+
+    # ✅ curl_body: 실제 요청 body에 keyword를 여러 키로 주입
     curl_body = dict(body)
-    curl_body[keyword_param] = keyword
+    for kp in keyword_params:
+        curl_body[kp] = keyword
+
     curl = build_curl("POST", url, headers, curl_body)
-    return url, "POST", keyword_param, headers, body, curl
+
+    # ✅ 마찬가지로 raw_param 그대로 반환
+    return url, "POST", raw_param, headers, body, curl
 
 
 # =====================================================
@@ -588,7 +662,7 @@ def _render_step_api(group_name: str, group_prefix: str, step_key: str, step_no:
 
         st.text_input(
             "검색 키워드 파라미터명 (1단계 설정 키워드 순차 호출 대상 필드)",
-            help=f"예: query / q / keyword (테스트 예시: {example_kw})",
+            help=f"예: query / q / keyword (테스트 예시: {example_kw})\n , 구분자를 통해 동일 키워드를 여러 파라미터에 담을 수 있습니다.",
             key=f"{group_prefix}_param"
         )
 

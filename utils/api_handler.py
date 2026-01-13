@@ -1,8 +1,24 @@
 import requests
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
+
+def _parse_keyword_params(raw: str) -> List[str]:
+    if not raw:
+        return []
+    s = str(raw).strip()
+    for sep in [",", "|", "\n", "\t"]:
+        s = s.replace(sep, " ")
+    keys = [x.strip() for x in s.split(" ") if x.strip()]
+
+    seen = set()
+    out = []
+    for k in keys:
+        if k not in seen:
+            out.append(k)
+            seen.add(k)
+    return out
 
 def make_api_call(
         url: str,
@@ -12,14 +28,19 @@ def make_api_call(
         headers: Optional[Dict] = None,
         body_params: Optional[Dict] = None
 ) -> Dict[str, Any]:
-    '''API 호출 실행'''
+    """API 호출 실행"""
     try:
+        key_list = _parse_keyword_params(keyword_param)
+        if not key_list:
+            key_list = ["query"]  # fallback
+
         if method == "GET":
-            params = {keyword_param: keyword}
+            params = {k: keyword for k in key_list}
             response = requests.get(url, params=params, headers=headers, timeout=10)
         else:  # POST
             body = body_params.copy() if body_params else {}
-            body[keyword_param] = keyword
+            for k in key_list:
+                body[k] = keyword
             response = requests.post(url, json=body, headers=headers, timeout=10)
 
         response.raise_for_status()
