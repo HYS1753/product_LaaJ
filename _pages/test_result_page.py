@@ -705,7 +705,7 @@ def _render_list():
     gb.configure_column("Size", headerName="Size(KB)", width=110)
     gb.configure_column("path", hide=True)
     gb.configure_column("mtime", hide=True)
-    gb.configure_pagination(enabled=True, paginationAutoPageSize=False, paginationPageSize=8)
+    gb.configure_pagination(enabled=True, paginationAutoPageSize=False, paginationPageSize=5)
 
     grid_options = gb.build()
     grid_options["rowSelection"] = "single"
@@ -715,7 +715,7 @@ def _render_list():
     grid_response = AgGrid(
         df,
         gridOptions=grid_options,
-        height=320,
+        height=303,
         data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         fit_columns_on_grid_load=True,
