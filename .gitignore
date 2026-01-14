@@ -62,4 +62,7 @@ Thumbs.db
 *.key
 *.pem
 
-
+# 🛑 Test 정의, 결과, 대상 키워드 로컬 파일 제외
+test_config
+test_keywords
+test_results
