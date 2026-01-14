@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 from datetime import datetime
+import base64
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
@@ -50,6 +52,9 @@ def _init_state():
     st.session_state.setdefault("results_selected_path", None)
     st.session_state.setdefault("results_loaded_obj", None)
     st.session_state.setdefault("results_active_tab", "1) Overview")
+
+    st.session_state.setdefault("export_html_requested", False)
+    st.session_state.setdefault("export_html_tab", "1) Overview")
 
 
 def _reset_state_to_list():
@@ -180,6 +185,257 @@ def _plot_ndcg_diff_by_query(
 
     fig.tight_layout()
     return fig
+
+# =========================================================
+# Export to HTML
+# =========================================================
+
+def _fig_to_base64_png(fig) -> str:
+    buf = BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("utf-8")
+
+
+def _export_overview_html(report: dict, control_label: str, exp_label: str) -> str:
+    summary = report.get("summary") or {}
+    pairwise = (summary.get("pairwise") or {})
+    ndcg = (summary.get("ndcg") or {})
+
+    w_control = pairwise.get("win_control", pairwise.get("win_A", 0))
+    w_exp = pairwise.get("win_experimental", pairwise.get("win_B", 0))
+    w_tie = pairwise.get("tie", 0)
+
+    mean_diff = ndcg.get("mean_diff_control_minus_experimental", ndcg.get("mean_diff_A_minus_B", 0.0))
+    ci_lo = ndcg.get("ci_95_lower", 0.0)
+    ci_hi = ndcg.get("ci_95_upper", 0.0)
+
+    fig_pie = _plot_pairwise_pie(int(w_control), int(w_exp), int(w_tie), control_label, exp_label)
+    fig_ci = _plot_ndcg_ci(float(mean_diff), float(ci_lo), float(ci_hi), f"nDCG diff {control_label}-{exp_label} (95% CI)")
+
+    pie_b64 = _fig_to_base64_png(fig_pie)
+    ci_b64 = _fig_to_base64_png(fig_ci)
+
+    return f"""
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Test Result Report - Overview</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; }}
+    h1 {{ margin: 0 0 6px 0; }}
+    .sub {{ color:#666; margin-bottom:16px; }}
+    .grid {{ display:flex; gap:18px; }}
+    .card {{
+      border:1px solid #eaeaea; border-radius:12px; padding:14px;
+      margin: 12px 0; background:#fff;
+    }}
+    .kpi {{ display:flex; gap:12px; flex-wrap:wrap; }}
+    .kpi .item {{ border:1px solid #f0f0f0; border-radius:10px; padding:10px 12px; min-width:140px; }}
+    img {{ max-width: 100%; height: auto; }}
+    pre {{ white-space: pre-wrap; word-wrap: break-word; font-size: 12px; }}
+  </style>
+</head>
+<body>
+  <h1>Test Result Report</h1>
+  <div class="sub">Tab: Overview / {control_label} vs {exp_label}</div>
+
+  <div class="card">
+    <h3>Summary</h3>
+    <pre>{_json_pretty(summary)}</pre>
+  </div>
+
+  <div class="grid">
+    <div class="card" style="flex:1;">
+      <h3>Pairwise Wins</h3>
+      <img src="data:image/png;base64,{pie_b64}" />
+    </div>
+    <div class="card" style="flex:1;">
+      <h3>nDCG diff (95% CI)</h3>
+      <img src="data:image/png;base64,{ci_b64}" />
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>How to export PDF</h3>
+    <div class="sub">
+      Open this HTML in Chrome → Print (Ctrl/Cmd+P) → Destination: Save as PDF
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+
+def _export_pairwise_html(report: dict, control_label: str, exp_label: str) -> str:
+    rows = report.get("pairwise_results") or []
+    # 간단 테이블 HTML
+    trs = []
+    for r in rows:
+        qid = r.get("qid","")
+        query = r.get("query","")
+        winner = _winner_to_label(r.get("winner","tie"), control_label, exp_label)
+        conf = r.get("confidence","")
+        reason = r.get("reason","")
+        trs.append(f"<tr><td>{qid}</td><td>{query}</td><td>{winner}</td><td>{conf}</td><td>{reason}</td></tr>")
+
+    return f"""
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Test Result Report - Pairwise</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; }}
+    h1 {{ margin: 0 0 6px 0; }}
+    .sub {{ color:#666; margin-bottom:16px; }}
+    table {{ width:100%; border-collapse: collapse; font-size: 12px; }}
+    th, td {{ border:1px solid #eee; padding:8px; vertical-align: top; }}
+    th {{ background:#fafafa; text-align:left; }}
+  </style>
+</head>
+<body>
+  <h1>Test Result Report</h1>
+  <div class="sub">Tab: Pairwise Detail / {control_label} vs {exp_label}</div>
+
+  <table>
+    <thead>
+      <tr><th>qid</th><th>query</th><th>winner</th><th>confidence</th><th>reason</th></tr>
+    </thead>
+    <tbody>
+      {''.join(trs)}
+    </tbody>
+  </table>
+
+  <div class="sub" style="margin-top:14px;">
+    Open in Chrome → Print → Save as PDF
+  </div>
+</body>
+</html>
+"""
+
+
+def _export_ndcg_html(report: dict, control_label: str, exp_label: str) -> str:
+    rows = report.get("query_details") or []
+    df = _build_ndcg_df(rows)
+
+    if "ndcg_control" not in df.columns and "ndcg_A" in df.columns:
+        df["ndcg_control"] = df["ndcg_A"]
+    if "ndcg_experimental" not in df.columns and "ndcg_B" in df.columns:
+        df["ndcg_experimental"] = df["ndcg_B"]
+    if "ndcg_diff" not in df.columns and ("ndcg_control" in df.columns and "ndcg_experimental" in df.columns):
+        df["ndcg_diff"] = df["ndcg_control"] - df["ndcg_experimental"]
+
+    # 차트 2개
+    fig1 = _plot_ndcg_by_query(df, control_label, exp_label)
+    fig2 = _plot_ndcg_diff_by_query(df, control_label, exp_label)
+    b64_1 = _fig_to_base64_png(fig1)
+    b64_2 = _fig_to_base64_png(fig2)
+
+    # 테이블
+    trs = []
+    for _, r in df.iterrows():
+        trs.append(
+            f"<tr><td>{r.get('qid','')}</td><td>{r.get('query','')}</td>"
+            f"<td>{float(r.get('ndcg_control',0)):.4f}</td><td>{float(r.get('ndcg_experimental',0)):.4f}</td>"
+            f"<td>{float(r.get('ndcg_diff',0)):.4f}</td></tr>"
+        )
+
+    return f"""
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Test Result Report - nDCG</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; }}
+    h1 {{ margin: 0 0 6px 0; }}
+    .sub {{ color:#666; margin-bottom:16px; }}
+    .grid {{ display:flex; gap:18px; }}
+    .card {{ border:1px solid #eaeaea; border-radius:12px; padding:14px; background:#fff; }}
+    table {{ width:100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }}
+    th, td {{ border:1px solid #eee; padding:8px; vertical-align: top; }}
+    th {{ background:#fafafa; text-align:left; }}
+    img {{ max-width: 100%; height: auto; }}
+  </style>
+</head>
+<body>
+  <h1>Test Result Report</h1>
+  <div class="sub">Tab: nDCG Detail / {control_label} vs {exp_label}</div>
+
+  <div class="grid">
+    <div class="card" style="flex:1;">
+      <h3>nDCG by Query</h3>
+      <img src="data:image/png;base64,{b64_1}" />
+    </div>
+    <div class="card" style="flex:1;">
+      <h3>nDCG diff by Query</h3>
+      <img src="data:image/png;base64,{b64_2}" />
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <h3>nDCG Table</h3>
+    <table>
+      <thead>
+        <tr><th>qid</th><th>query</th><th>ndcg({control_label})</th><th>ndcg({exp_label})</th><th>diff</th></tr>
+      </thead>
+      <tbody>
+        {''.join(trs)}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub" style="margin-top:14px;">
+    Open in Chrome → Print → Save as PDF
+  </div>
+</body>
+</html>
+"""
+
+
+def _export_report_html_all(report: dict, control_label: str, exp_label: str) -> tuple[str, str]:
+    """
+    Overview + Pairwise Detail + nDCG Detail을 하나의 HTML로 묶어서 반환
+    """
+    overview_html = _export_overview_html(report, control_label, exp_label)
+    pairwise_html = _export_pairwise_html(report, control_label, exp_label)
+    ndcg_html = _export_ndcg_html(report, control_label, exp_label)
+
+    html = f"""
+    <html>
+    <head>
+      <meta charset="utf-8"/>
+      <title>Test Result Report</title>
+      <style>
+        body {{ font-family: Arial, sans-serif; margin: 24px; }}
+        .section {{ margin-bottom: 36px; }}
+        .section h2 {{ margin: 0 0 10px 0; }}
+        .divider {{ height:1px; background:#e5e7eb; margin: 18px 0; }}
+      </style>
+    </head>
+    <body>
+      <div class="section" id="overview">
+        <h2>1) Overview</h2>
+        {overview_html}
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section" id="pairwise">
+        <h2>2) Pairwise Detail</h2>
+        {pairwise_html}
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section" id="ndcg">
+        <h2>3) nDCG Detail</h2>
+        {ndcg_html}
+      </div>
+    </body>
+    </html>
+    """
+    return html, "full_report"
+
 
 # =========================================================
 # Report UI blocks
@@ -584,7 +840,8 @@ def _render_report(report_path: str):
     control_label, exp_label = _infer_labels(pairwise)
 
     # 상단 헤더 (Back + 파일명)
-    top = st.columns([0.80, 0.20], vertical_alignment="center")
+    top = st.columns([0.60, 0.20, 0.20], vertical_alignment="center")
+
     with top[0]:
         st.markdown(
             f"## Test Result Report\n"
@@ -593,7 +850,32 @@ def _render_report(report_path: str):
             f"</div>",
             unsafe_allow_html=True,
         )
+
     with top[1]:
+        # ✅ 버튼 위치를 잡아둘 placeholder
+        download_slot = top[1].empty()
+
+        # 1️⃣ 최초엔 일반 버튼
+        if download_slot.button("Download report", use_container_width=True):
+            html, suffix = _export_report_html_all(
+                report=report,
+                control_label=control_label,
+                exp_label=exp_label
+            )
+
+            out_name = f"{Path(report_path).stem}_{suffix}.html"
+
+            # 2️⃣ 같은 자리에서 download_button으로 교체
+            download_slot.download_button(
+                label="⬇️ Download report",
+                data=html.encode("utf-8"),
+                file_name=out_name,
+                mime="text/html",
+                use_container_width=True,
+                key=f"download_html_{out_name}",
+            )
+
+    with top[2]:
         if st.button("Back to list", use_container_width=True):
             _reset_state_to_list()
             st.rerun()
