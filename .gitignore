@@ -8,6 +8,7 @@ src/resources/.env
 *.env
 gcp/googlecloud.json
 src/resources/googlecloud.json
+resources/credentials/google/*.json
 
 # 🛑 Local Libary 파일
 libs/*

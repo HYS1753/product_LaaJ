@@ -2,6 +2,7 @@ import os
 import json
 import time
 from typing import Any, Dict, Optional
+from pathlib import Path
 from google import genai
 from google.genai import types
 
@@ -14,6 +15,7 @@ class GeminiClient:
             max_retries: Optional[int] = None
     ):
         # 1. 환경 변수 또는 사용자 입력값으로 설정 (우선순위: 사용자 입력 > .env)
+        self.use_vertex_ai = bool(os.getenv("GEMINI_USE_VERTEX_AI"))
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model_name = model_name or os.getenv("GEMINI_API_MODEL", "gemini-2.5-flash")
 
@@ -25,10 +27,15 @@ class GeminiClient:
         self.max_retries = int(max_retries if max_retries is not None else env_retries)
 
         # 2. 클라이언트 초기화
-        if not self.api_key:
-            raise ValueError("API Key가 설정되지 않았습니다. .env 파일을 확인하거나 api_key를 전달하세요.")
-
-        self.client = genai.Client(api_key=self.api_key)
+        if self.use_vertex_ai:
+            BASE_DIR = Path(__file__).resolve().parents[1]
+            GOOGLE_APPLICATION_CREDENTIALS_ABSOLUTE_PATH = (BASE_DIR / os.getenv("GOOGLE_APPLICATION_CREDENTIALS")).resolve()
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(GOOGLE_APPLICATION_CREDENTIALS_ABSOLUTE_PATH)
+            self.client = genai.Client(vertexai=self.use_vertex_ai)
+        else:
+            if not self.api_key:
+                raise ValueError("API Key가 설정되지 않았습니다. .env 파일을 확인하거나 api_key를 전달하세요.")
+            genai.Client(vertexai=self.use_vertex_ai, api_key=self.api_key)
 
     def generate_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         last_err: Optional[Exception] = None
